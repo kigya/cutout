@@ -62,6 +62,7 @@ class BackgroundRemoverTest {
         val remover = BackgroundRemover(app)
         remover.prepare().getOrThrow()
         val engine = ReflectionHelpers.getField<OrtSession>(remover, "session")
+        val options = ReflectionHelpers.getField<OrtSession.SessionOptions>(remover, "sessionOptions")
         try {
             assertTrue(remover.prepare().isSuccess)
             assertSame(engine, ReflectionHelpers.getField<OrtSession>(remover, "session"))
@@ -77,7 +78,10 @@ class BackgroundRemoverTest {
             assertFalse(source.isRecycled)
             if (cut.bitmap !== cut.frame) cut.bitmap.recycle()
             cut.frame.recycle(); source.recycle()
-        } finally { engine.close() }
+        } finally {
+            engine.close()
+            options.close()
+        }
     }
     @Test fun `model run failure closes the input tensor and leaves the caller bitmap valid`() = runBlocking<Unit> {
         val engine = mockk<OrtSession>()
@@ -133,13 +137,71 @@ class BackgroundRemoverTest {
         assertEquals(Removal.Broken("model"), remover.cut(image()))
         verify(exactly = 2) { assets.open("isnet.onnx") }
     }
+    @Test fun `successful session retains options until session cleanup`() = runBlocking<Unit> {
+        val assets = mockk<AssetManager>()
+        every { assets.open("isnet.onnx") } answers { ByteArrayInputStream(byteArrayOf(0)) }
+        val context = object : ContextWrapper(app) { override fun getAssets() = assets }
+        val environment = mockk<OrtEnvironment>()
+        val session = mockk<OrtSession>(relaxed = true)
+        every { session.inputNames } returns setOf("image")
+        var capturedOptions: OrtSession.SessionOptions? = null
+        every { environment.createSession(any<ByteArray>(), any<OrtSession.SessionOptions>()) } answers {
+            capturedOptions = secondArg()
+            session
+        }
+        mockkStatic(OrtEnvironment::class)
+        try {
+            every { OrtEnvironment.getEnvironment() } returns environment
+            val remover = BackgroundRemover(context)
+            assertTrue(remover.prepare().isSuccess)
+            val options = capturedOptions!!
+            assertSame(options, ReflectionHelpers.getField<OrtSession.SessionOptions>(remover, "sessionOptions"))
+            // ORT setters reject a closed options handle; successful prepare must retain it.
+            options.setIntraOpNumThreads(1)
+
+            session.close()
+            options.close()
+            assertThrows(IllegalStateException::class.java) { options.setIntraOpNumThreads(1) }
+        } finally { unmockkStatic(OrtEnvironment::class) }
+    }
+    @Test fun `options are closed when native session creation fails`() = runBlocking<Unit> {
+        val assets = mockk<AssetManager>()
+        every { assets.open("isnet.onnx") } answers { ByteArrayInputStream(byteArrayOf(0)) }
+        val context = object : ContextWrapper(app) { override fun getAssets() = assets }
+        val environment = mockk<OrtEnvironment>()
+        var capturedOptions: OrtSession.SessionOptions? = null
+        every { environment.createSession(any<ByteArray>(), any<OrtSession.SessionOptions>()) } answers {
+            capturedOptions = secondArg()
+            throw IllegalStateException("session creation failed")
+        }
+        mockkStatic(OrtEnvironment::class)
+        try {
+            every { OrtEnvironment.getEnvironment() } returns environment
+            val remover = BackgroundRemover(context)
+            assertTrue(remover.prepare().isFailure)
+            assertNotNull(capturedOptions)
+            assertThrows(IllegalStateException::class.java) {
+                capturedOptions!!.setIntraOpNumThreads(1)
+            }
+        } finally { unmockkStatic(OrtEnvironment::class) }
+    }
     @Test fun `invalid session without input is closed and not cached`() = runBlocking<Unit> {
         val assets = mockk<AssetManager>()
         every { assets.open("isnet.onnx") } answers { ByteArrayInputStream(byteArrayOf(0)) }
         val context = object : ContextWrapper(app) { override fun getAssets() = assets }
         val environment = mockk<OrtEnvironment>()
         val session = mockk<OrtSession>(relaxed = true)
-        every { environment.createSession(any<ByteArray>(), any<OrtSession.SessionOptions>()) } returns session
+        var capturedOptions: OrtSession.SessionOptions? = null
+        var optionsWereOpenWhenSessionClosed = false
+        every { session.close() } answers {
+            optionsWereOpenWhenSessionClosed = runCatching {
+                capturedOptions!!.setIntraOpNumThreads(1)
+            }.isSuccess
+        }
+        every { environment.createSession(any<ByteArray>(), any<OrtSession.SessionOptions>()) } answers {
+            capturedOptions = secondArg()
+            session
+        }
         every { session.inputNames } returns emptySet()
         mockkStatic(OrtEnvironment::class)
         try {
@@ -148,6 +210,10 @@ class BackgroundRemoverTest {
             assertTrue(remover.prepare().isFailure)
             assertEquals(Removal.Broken("model"), remover.cut(image()))
             verify(exactly = 1) { session.close() }
+            assertTrue("session must close before its options", optionsWereOpenWhenSessionClosed)
+            assertThrows(IllegalStateException::class.java) {
+                capturedOptions!!.setIntraOpNumThreads(1)
+            }
         } finally { unmockkStatic(OrtEnvironment::class) }
     }
     @Test fun `malformed output metadata cannot produce success`() = runBlocking<Unit> {

@@ -755,6 +755,8 @@ test('processing announces the stage and shows progress animation only during in
   );
   expect(screen.getByText('Removing the background on this device…')).toBeTruthy();
   expect(screen.getByLabelText('Removing the background on this device…')).toBeTruthy();
+  expect(screen.getByRole('progressbar')).toHaveAccessibilityValue({ min: 0, max: 100, now: 40 });
+  expect(screen.getByText('40%')).toBeTruthy();
   await screen.unmount();
   await render(
     <LocaleGate>
@@ -762,6 +764,7 @@ test('processing announces the stage and shows progress animation only during in
     </LocaleGate>,
   );
   expect(screen.getByText('Preparing your cutout…')).toBeTruthy();
+  expect(screen.getByText('92%')).toBeTruthy();
   expect(screen.queryByLabelText('Preparing your cutout…')).toBeNull();
   await screen.unmount();
   await render(
@@ -908,8 +911,10 @@ test('the bubble preserves newer state and reports inference, reduced motion, an
   expect(screen.getByRole('button', { name: 'Cut another' })).toBeTruthy();
   expect(screen.getByText('Copied')).toBeTruthy();
 
-  await emitDevice('bubbleState', { ...bubble, phase: 'working', stage: 'inference', expanded: true, previewPath: '/progress.png', revision: 11 });
+  await emitDevice('bubbleState', { ...bubble, phase: 'working', stage: 'inference', percent: 12, expanded: true, previewPath: '/progress.png', revision: 11 });
   expect(screen.getByText('Removing the background on this device…')).toBeTruthy();
+  expect(screen.getByText('12%')).toBeTruthy();
+  expect(screen.getByRole('progressbar')).toHaveAccessibilityValue({ min: 0, max: 100, now: 12 });
   await act(async () => { reducedMotionChange(true); });
   await emitDevice('bubbleState', { ...bubble, phase: 'working', stage: 'exporting', percent: 78, expanded: true, previewPath: '/progress.png', revision: 12 });
   expect(screen.getByText('78%')).toBeTruthy();

@@ -150,7 +150,8 @@ export function BubbleApp() {
         <View>
           <SweepPreview overlayVisible path={state.previewPath} width={220} height={112} />
           {state.stage === 'inference' ? <ActivityIndicator className="mt-3" color={colors.accent} /> : null}
-          <Text className="mt-3 text-center text-lg font-semibold" style={{ color: colors.text }}>{state.stage === 'inference' ? t('processingInference') : `${clampPercent(state.percent)}%`}</Text>
+          {state.stage === 'inference' ? <Text className="mt-3 text-center text-base" style={{ color: colors.textMuted }}>{t('processingInference')}</Text> : null}
+          <Text accessibilityRole="progressbar" accessibilityLabel={t('processing')} accessibilityValue={{ min: 0, max: 100, now: clampPercent(state.percent) }} className="mt-3 text-center text-lg font-semibold" style={{ color: colors.text }}>{clampPercent(state.percent)}%</Text>
         </View>
       ) : null}
       {result ? (

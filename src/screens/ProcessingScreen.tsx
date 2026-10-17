@@ -5,6 +5,7 @@ import { SweepPreview } from '../components/SweepPreview';
 import { useLocale } from '../i18n/LocaleGate';
 import { useTheme } from '../theme/ThemeProvider';
 import type { BubbleSnapshot } from '../native/Erase';
+import { clampPercent } from '../logic/progress';
 
 type Props = {
   previewPath: string | null;
@@ -34,6 +35,7 @@ export function ProcessingScreen({ previewPath, percent, stage, onCancel }: Prop
           {active ? <ActivityIndicator accessibilityLabel={stageLabel} color={colors.primary} size="small" /> : null}
           <Text accessibilityLiveRegion="polite" className="text-base font-medium" style={{ color: colors.textMuted }}>{stageLabel}</Text>
         </View>
+        <Text accessibilityRole="progressbar" accessibilityLabel={t('processing')} accessibilityValue={{ min: 0, max: 100, now: clampPercent(percent) }} className="mb-3 text-lg font-semibold" style={{ color: colors.text }}>{clampPercent(percent)}%</Text>
         <SweepPreview path={previewPath} windowWidth={window.width} windowHeight={window.height} />
       </View>
     </Screen>

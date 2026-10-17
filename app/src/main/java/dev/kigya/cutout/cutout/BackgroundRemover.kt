@@ -34,6 +34,9 @@ class BackgroundRemover @Inject constructor(
     private val mutex = Mutex()
     private var environment: OrtEnvironment? = null
     private var session: OrtSession? = null
+    // ORT requires these native resources to outlive every session created with them.
+    @field:androidx.annotation.Keep
+    private var sessionOptions: OrtSession.SessionOptions? = null
     private var inputName: String? = null
 
     suspend fun prepare(): Result<Unit> = withContext(Dispatchers.Default) {
@@ -56,19 +59,24 @@ class BackgroundRemover @Inject constructor(
 
     private fun open() {
         val env = environment ?: OrtEnvironment.getEnvironment().also { environment = it }
-        val created = OrtSession.SessionOptions().use { options ->
+        val options = OrtSession.SessionOptions()
+        var created: OrtSession? = null
+        var retained = false
+        try {
             options.setIntraOpNumThreads(2)
             options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
             val bytes = context.assets.open(MODEL).use { it.readBytes() }
             // ISNet at 1024 (MIT, imgly/isnet-general-onnx); inference stays on device.
-            env.createSession(bytes, options)
-        }
-        try {
+            created = env.createSession(bytes, options)
             inputName = created.inputNames.first()
+            sessionOptions = options
             session = created
-        } catch (error: Exception) {
-            created.close()
-            throw error
+            retained = true
+        } finally {
+            if (!retained) {
+                try { created?.close() }
+                finally { options.close() }
+            }
         }
     }
 
