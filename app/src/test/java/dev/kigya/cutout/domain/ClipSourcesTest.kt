@@ -39,6 +39,13 @@ class ClipSourcesTest {
     }
 
     @Test
+    fun svgMarkupInClipboardHtmlIsRecognizedAsVectorContent() {
+        val svg = "<svg viewBox='0 0 10 10'><path d='M0 0'/></svg>"
+
+        assertEquals(listOf(ClipSource.Svg(svg)), clipSources(listOf(ClipPiece(html = svg))))
+    }
+
+    @Test
     fun streamUriIsIncluded() {
         val sources = clipSources(
             listOf(ClipPiece(streamUris = listOf("content://media/external/images/media/7"))),
@@ -52,5 +59,27 @@ class ClipSourcesTest {
         assertTrue(clipHasImage(listOf("image/svg+xml")))
         assertTrue(!clipHasImage(listOf("text/plain")))
         assertTrue(!clipHasImage(emptyList()))
+    }
+
+    @Test
+    fun localUriNormalizationTrimsLocalSchemesAndRejectsRemoteOrPlainText() {
+        assertEquals("content://media/item/1", localImageUri("  content://media/item/1  "))
+        assertEquals("file:///tmp/object.png", localImageUri("file:///tmp/object.png"))
+        assertEquals("file:///storage/object.png", localImageUri("/storage/object.png"))
+        assertEquals(null, localImageUri("https://example.com/object.png"))
+        assertEquals(null, localImageUri("object.png"))
+        assertEquals(null, localImageUri("  "))
+    }
+
+    @Test
+    fun htmlImageParserSupportsSingleQuotedAndUnquotedSourcesInDocumentOrder() {
+        assertEquals(
+            listOf("content://media/first", "file:///tmp/second.png", "content://media/third"),
+            imageSourcesFromHtml("""
+                <img src='content://media/first'><img src=file:///tmp/second.png>
+                <img alt="object" SRC="content://media/third">
+            """.trimIndent()),
+        )
+        assertTrue(imageSourcesFromHtml("<p>no image source here</p>").isEmpty())
     }
 }

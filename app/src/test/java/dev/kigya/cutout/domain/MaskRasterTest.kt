@@ -45,4 +45,26 @@ class MaskRasterTest {
         val edge = softAlpha(0.34f)
         assertTrue(edge > 0.1f && edge < 0.9f)
     }
+
+    @Test
+    fun constantAndEmptyMasksHaveDeterministicFallbacks() {
+        assertEquals(0f, stretchUnit(floatArrayOf(0.4f, 0.4f, 0.4f)).sum(), 0f)
+        assertTrue(stretchUnit(floatArrayOf()).isEmpty())
+
+        assertEquals(listOf(0f, 0f, 0f, 0f), resampleBilinear(floatArrayOf(1f), 0, 1, 2, 2).toList())
+        assertEquals(listOf(0f, 0f, 0f, 0f), resampleBilinear(floatArrayOf(1f), 1, 0, 2, 2).toList())
+        assertTrue(resampleBilinear(floatArrayOf(1f), 1, 1, 0, 2).isEmpty())
+        assertTrue(resampleBilinear(floatArrayOf(1f), 1, 1, 2, 0).isEmpty())
+    }
+
+    @Test
+    fun alphaBoundsUseInclusiveThresholdAndReturnNullWhenNothingQualifies() {
+        val pixels = intArrayOf(0x07ffffff, 0x08ffffff, 0x07ffffff, 0x00ffffff)
+        assertEquals(PixelBounds(left = 1, top = 0, width = 1, height = 1), boundsOfAlpha(pixels, 2, 2, 8))
+        assertNull(boundsOfAlpha(pixels, 2, 2, 9))
+        assertEquals(
+            PixelBounds(left = 0, top = 0, width = 2, height = 2),
+            boundsOfAlpha(intArrayOf(0x08ffffff, 0x08ffffff, 0x08ffffff, 0x08ffffff), 2, 2, 8),
+        )
+    }
 }

@@ -18,19 +18,23 @@ import { LanguageScreen } from './screens/LanguageScreen';
 import { ProcessingScreen } from './screens/ProcessingScreen';
 import { ResultScreen } from './screens/ResultScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { FeedbackScreen } from './screens/FeedbackScreen';
 
 type Source = 'gallery' | 'file' | 'clipboard' | 'fixture';
 
 type Route =
   | { name: 'home' }
   | { name: 'settings' }
+  | { name: 'feedback' }
   | { name: 'language' }
   | { name: 'processing'; preview: string | null; percent: number; stage?: 'preparing'|'inference'|'exporting'|'ready'|'failed'|'idle' }
   | { name: 'result'; session: EditSession }
   | { name: 'editor'; session: EditSession };
 
+const FEEDBACK_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyX2iZxF_QSEC_Lg_9vFdFmwCxXOtwz6EpIeqALAY81j05ntV6Tw6HJsQAO6jRhhPsQ/exec';
+
 const EMPTY: HomeSnapshot = { rows: [], bubbleEnabled: false, showXiaomiTip: false, clipboardReady: false };
-const PRIVACY_POLICY_URL = 'https://raw.githubusercontent.com/kigya/cutout/92f8bbd300061e94c4fd193644d718eebebb2a94/PRIVACY.md';
+const PRIVACY_POLICY_URL = 'https://raw.githubusercontent.com/kigya/cutout/f93fef6e20e903c65abd38d6d243b2ea26f8a428/PRIVACY.md';
 
 export default function App() {
   const [preferences, setPreferences] = useState<AppPreferences>(DEFAULT_PREFERENCES);
@@ -83,7 +87,6 @@ function Root({ preferences, onPreferences }: { preferences: AppPreferences; onP
 
   useEffect(() => {
     void refresh();
-    void Erase.prepareModel().catch(() => undefined);
     void openEdit();
     const subscription = AppState.addEventListener('change', state => {
       if (state === 'active') void refresh();
@@ -204,11 +207,12 @@ function Root({ preferences, onPreferences }: { preferences: AppPreferences; onP
           onAnalyticsChange={analytics => { void onPreferences({ ...preferences, analytics }).catch(() => setNotice(t('saveFailed'))); }}
           onCrashChange={crashes => { void onPreferences({ ...preferences, crashes }).catch(() => setNotice(t('saveFailed'))); }}
           onOpenPrivacy={() => { void Linking.openURL(PRIVACY_POLICY_URL).catch(() => setNotice(t('privacyOpenFailed'))); }}
-          onFeedback={() => { void Linking.openURL('mailto:kirillborichevskiy@gmail.com?subject=Cutout%20feedback').catch(() => setNotice(t('feedbackFailed'))); }}
+          onFeedback={() => setRoute({ name: 'feedback' })}
           onBack={() => setRoute({ name: 'home' })}
           onLanguage={() => setRoute({ name: 'language' })}
         />
       ) : null}
+      {route.name === 'feedback' ? <FeedbackScreen endpoint={FEEDBACK_ENDPOINT} onBack={() => setRoute({ name: 'settings' })} /> : null}
       {route.name === 'language' ? <LanguageScreen onBack={() => setRoute({ name: 'settings' })} /> : null}
       {route.name === 'processing' ? (
         <ProcessingScreen stage={route.stage} previewPath={route.preview} percent={route.percent} onCancel={cancelProcessing} />

@@ -5,6 +5,10 @@ export function clampScale(scale: number): number {
   return scale;
 }
 
+export function positiveScaleOrOne(scale: number): number {
+  return scale > 0 ? scale : 1;
+}
+
 export function clampPan(pan: number, view: number, scale: number): number {
   'worklet';
   if (scale <= 1 || view <= 0) return 0;

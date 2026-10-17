@@ -379,9 +379,10 @@ private class OverlayRoot(
             MotionEvent.ACTION_MOVE -> {
                 if (!tracking) return false
                 if (hypot(event.rawX - downRawX, event.rawY - downRawY) > slop) {
+                    // Keep the previous touch position for onTouchEvent. On the
+                    // first intercepted MOVE Android forwards this same event to
+                    // onTouchEvent, which needs the full initial delta.
                     dragging = true
-                    lastRawX = event.rawX
-                    lastRawY = event.rawY
                     return true
                 }
             }

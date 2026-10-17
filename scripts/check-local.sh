@@ -27,7 +27,7 @@ need() {
 
 need node
 need npm
-node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 11)) { console.error(`Node 22.11+ required; found ${process.version}`); process.exit(1); }'
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (!((major === 22 && minor >= 13) || (major === 24 && minor >= 3) || major >= 26)) { console.error(`React Native requires Node ^22.13, ^24.3 or >=26; found ${process.version}`); process.exit(1); }'
 
 printf '\n== Publication gate ==\n'
 python3 scripts/check-publication.py --dry-run
@@ -44,6 +44,9 @@ while IFS= read -r -d '' file; do
 done < <(find . -maxdepth 2 -type f \( -name '*.js' -o -name '*.cjs' \) -not -path './node_modules/*' -print0)
 find src scripts -type f \( -name '*.js' -o -name '*.cjs' \) -print0 2>/dev/null | while IFS= read -r -d '' file; do node --check "$file"; done
 
+printf '\n== Mobile scan policy tests ==\n'
+python3 scripts/check-mobile-sast.test.py
+
 printf '\n== Jest with configured coverage thresholds ==\n'
 npm test -- --runInBand
 
@@ -51,7 +54,8 @@ if (( SKIP_AUDIT )); then
   printf 'SKIPPED: npm audit (--skip-dependency-audit)\n'
 else
   printf '\n== Dependency vulnerability audit ==\n'
-  npm audit --audit-level=high
+  node --test scripts/audit-dependencies.test.cjs
+  node scripts/audit-dependencies.cjs
 fi
 
 if (( SKIP_SECURITY )); then

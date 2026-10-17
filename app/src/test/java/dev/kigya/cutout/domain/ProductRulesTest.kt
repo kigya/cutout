@@ -14,6 +14,8 @@ class ProductRulesTest {
         assertTrue(MaskPolicy.evaluate(0.95f).usable)
         val samples = FloatArray(100) { index -> if (index == 0) 1f else 0f }
         assertEquals(0.01f, MaskPolicy.foregroundFraction(samples), 0.0001f)
+        assertEquals(0f, MaskPolicy.foregroundFraction(floatArrayOf()), 0f)
+        assertEquals(0.5f, MaskPolicy.foregroundFraction(floatArrayOf(0.49f, 0.5f), threshold = 0.5f), 0.0001f)
     }
 
     @Test

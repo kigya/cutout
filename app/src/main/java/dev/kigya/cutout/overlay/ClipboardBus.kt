@@ -23,36 +23,42 @@ class ClipboardBus @Inject constructor() {
     private var activity: java.lang.ref.WeakReference<android.app.Activity>? = null
     private val consumeSlot = AtomicReference<CompletableDeferred<ClipboardLook?>?>(null)
 
-    fun awaitConsume(): CompletableDeferred<ClipboardLook?> {
-        cancelConsume()
+    @Synchronized fun awaitConsume(): CompletableDeferred<ClipboardLook?> {
         val deferred = CompletableDeferred<ClipboardLook?>()
+        val previous = consumeSlot.getAndSet(deferred)
+        val previousActivity = activity?.get()
+        activity = null
         consumeRequestId = java.util.UUID.randomUUID().toString()
-        consumeSlot.getAndSet(deferred)?.cancel()
+        previous?.complete(null)
+        previousActivity?.runOnUiThread { previousActivity.finish() }
         return deferred
     }
 
-    fun attachForeground(value: android.app.Activity, requestId: String?): Boolean {
+    @Synchronized fun attachForeground(value: android.app.Activity, requestId: String?): Boolean {
         if (requestId == null || requestId != consumeRequestId || consumeSlot.get() == null) return false
         activity = java.lang.ref.WeakReference(value)
         return true
     }
 
-    fun offer(read: ClipboardRead) {
+    @Synchronized fun offer(read: ClipboardRead) {
         if (read.requestId != null) {
             if (read.requestId != consumeRequestId) return
-            consumeSlot.getAndSet(null)?.complete(read.look)
+            val pending = consumeSlot.getAndSet(null)
             consumeRequestId = null
+            pending?.complete(read.look)
             return
         }
         // Only explicit bubble reads are eligible for the bubble flow.
         readsFlow.tryEmit(read)
     }
 
-    fun cancelConsume(requestId: String? = null) {
+    @Synchronized fun cancelConsume(requestId: String? = null) {
         if (requestId != null && requestId != consumeRequestId) return
-        consumeSlot.getAndSet(null)?.complete(null)
+        val pending = consumeSlot.getAndSet(null)
+        val owner = activity?.get()
         consumeRequestId = null
-        activity?.get()?.let { value -> value.runOnUiThread { value.finish() } }
         activity = null
+        pending?.complete(null)
+        owner?.runOnUiThread { owner.finish() }
     }
 }

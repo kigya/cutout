@@ -1,6 +1,10 @@
 export type Point = { x: number; y: number };
 export type BrushTool = 'erase' | 'restore';
 
+export function previousStrokePoint(points: readonly Point[], fallback: Point): Point {
+  return points[points.length - 1] ?? fallback;
+}
+
 export function strokePoints(from: Point, to: Point, spacing: number): Point[] {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
@@ -96,6 +100,28 @@ export function canReplay(step: Uint8Array | undefined, current: Uint8Array | nu
 
 export type ViewTransform = { scale: number; tx: number; ty: number };
 
+export type ImageRect = { x: number; y: number; width: number; height: number };
+
+export function containRect(
+  viewWidth: number,
+  viewHeight: number,
+  imageWidth: number,
+  imageHeight: number,
+): ImageRect {
+  if (viewWidth <= 0 || viewHeight <= 0 || imageWidth <= 0 || imageHeight <= 0) {
+    return { x: 0, y: 0, width: 0, height: 0 };
+  }
+  const scale = Math.min(viewWidth / imageWidth, viewHeight / imageHeight);
+  const width = imageWidth * scale;
+  const height = imageHeight * scale;
+  return {
+    x: (viewWidth - width) / 2,
+    y: (viewHeight - height) / 2,
+    width,
+    height,
+  };
+}
+
 export function viewToBitmap(
   x: number,
   y: number,
@@ -113,8 +139,7 @@ export function viewToBitmap(
   const centerY = viewHeight / 2;
   const localX = (x - centerX - transform.tx) / userScale + centerX;
   const localY = (y - centerY - transform.ty) / userScale + centerY;
-  const scale = Math.min(viewWidth / imageWidth, viewHeight / imageHeight);
-  const left = (viewWidth - imageWidth * scale) / 2;
-  const top = (viewHeight - imageHeight * scale) / 2;
-  return { x: (localX - left) / scale, y: (localY - top) / scale };
+  const rect = containRect(viewWidth, viewHeight, imageWidth, imageHeight);
+  const scale = rect.width / imageWidth;
+  return { x: (localX - rect.x) / scale, y: (localY - rect.y) / scale };
 }

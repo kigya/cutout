@@ -22,6 +22,7 @@ import { SettingsScreen } from './screens/SettingsScreen';
 import { ThemeProvider } from './theme/ThemeProvider';
 
 declare const global: {
+  __modalDismisses: Array<() => void>;
   __erase: Record<string, jest.Mock>;
   __gestures: Array<{ handlers: Record<string, (event?: unknown) => void> }>;
   __gestureCompositions: Array<{ kind: string; gestures: Array<{ kind: string; pointerCount?: number; handlers: Record<string, (event?: unknown, success?: boolean) => void> }> }>;
@@ -82,6 +83,13 @@ async function emitDevice(name: string, payload: unknown) {
   });
 }
 
+async function dismissSourceModal() {
+  while (global.__modalDismisses.length) {
+    const dismiss = global.__modalDismisses.shift()!;
+    await act(async () => { dismiss(); });
+  }
+}
+
 function readySession(status: 'ready' | 'manual' | 'svg' | 'failed' = 'ready') {
   return { status, message: status, originalPath: '/o.png', cutoutPath: '/c.png', width: 4, height: 4 };
 }
@@ -93,6 +101,7 @@ afterEach(() => {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  global.__modalDismisses.length = 0;
   AppState.currentState = 'active';
   AppState.addEventListener = jest.fn(() => ({ remove: jest.fn() }));
   AccessibilityInfo.isReduceMotionEnabled = jest.fn(async () => false);
@@ -323,13 +332,15 @@ test('home disables clipboard until a picture is there and explains each permiss
   await userEvent.press(screen.getByRole('button', { name: 'Cut here' }));
   await userEvent.press(screen.getByText('Choose a picture'));
   expect(screen.getByRole('button', { name: 'Gallery' })).toBeTruthy();
-  await userEvent.press(screen.getByRole('button', { name: 'Choose a picture' }));
+  await userEvent.press(screen.getByRole('button', { name: 'Back' }));
   await userEvent.press(screen.getByRole('button', { name: 'Cut here' }));
   expect(screen.getByRole('button', { name: 'Clipboard' })).toBeDisabled();
   expect(onCut).not.toHaveBeenCalled();
   await userEvent.press(screen.getByRole('button', { name: 'Gallery' }));
+  await dismissSourceModal();
   await userEvent.press(screen.getByRole('button', { name: 'Cut here' }));
   await userEvent.press(screen.getByRole('button', { name: 'File' }));
+  await dismissSourceModal();
   expect(onCut).toHaveBeenCalledWith('gallery');
   expect(onCut).toHaveBeenCalledWith('file');
   await userEvent.press(screen.getByRole('button', { name: 'Why this is needed: Windows from the background' }));
@@ -387,6 +398,7 @@ test('home hides bubble controls off Android and blocks source selection while b
   expect(screen.queryByLabelText('Show bubble')).toBeNull();
   await userEvent.press(screen.getByRole('button', { name: 'Cut here' }));
   await userEvent.press(screen.getByRole('button', { name: 'Gallery' }));
+  await dismissSourceModal();
   expect(onCut).toHaveBeenCalledWith('gallery');
   const os = jest.replaceProperty(Platform, 'OS', 'android');
   const android = await render(
@@ -452,6 +464,7 @@ test('the bubble switch explains a missing overlay and notifications use the And
   );
   await userEvent.press(screen.getByRole('button', { name: 'Cut here' }));
   await userEvent.press(screen.getByRole('button', { name: 'Clipboard' }));
+  await dismissSourceModal();
   erase.setBubble.mockRejectedValueOnce(new Error('toggle failed'));
   await setBubble(false);
   expect(screen.getByText('Could not read the picture')).toBeTruthy();
@@ -787,7 +800,9 @@ test('the bubble streams progress and answers save', async () => {
   });
   await userEvent.press(screen.getByRole('button', { name: 'Cut background' }));
   await userEvent.press(screen.getByRole('button', { name: 'Gallery' }));
+  await dismissSourceModal();
   await userEvent.press(screen.getByRole('button', { name: 'File' }));
+  await dismissSourceModal();
   await screen.unmount();
 });
 
@@ -902,6 +917,7 @@ test('the bubble preserves newer state and reports inference, reduced motion, an
   await emitDevice('bubbleState', { ...bubble, expanded: true, revision: 13 });
   erase.bubbleAction.mockRejectedValueOnce(new Error('native action failed'));
   await userEvent.press(screen.getByRole('button', { name: 'Gallery' }));
+  await dismissSourceModal();
   await flush();
   expect(screen.getByText('Could not read the picture')).toBeTruthy();
 
@@ -970,6 +986,10 @@ test('the editor previews absolute cutout alpha and exports that same mask while
 
   const initialCoverage = global.__maskImages.at(-1)?.pixels;
   expect(global.__skiaGroups.some(group => group.layer === true)).toBe(true);
+  expect(screen.getAllByTestId('sk-image').map(image => [image.props.x, image.props.y, image.props.width, image.props.height, image.props.fit])).toEqual([
+    [0, 0, 200, 200, 'fill'],
+    [0, 0, 200, 200, 'fill'],
+  ]);
   expect(initialCoverage?.[0]).toBe(0);
   expect(initialCoverage?.[10]).toBe(128);
 
@@ -1434,7 +1454,6 @@ test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   states.length = 0;
   erase.consumePendingEdit.mockResolvedValue(null);
   erase.getHome.mockResolvedValue({ ...home, clipboardReady: true });
-  erase.prepareModel.mockRejectedValueOnce(new Error('model'));
   erase.getPreferences = jest.fn(async () => ({ theme: 'dark', analytics: true, crashes: true }));
   erase.setPreferences = jest.fn(async () => undefined);
   await render(<App />);
@@ -1442,6 +1461,7 @@ test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   await act(async () => { await new Promise<void>(resolve => setTimeout(resolve, 1500)); });
   await act(async () => { await Promise.resolve(); });
   expect(screen.getByText('Cutout')).toBeTruthy();
+  expect(erase.prepareModel).not.toHaveBeenCalled();
   erase.getHome.mockClear();
   await act(async () => { states[0]?.('active'); await Promise.resolve(); });
   expect(erase.getHome).toHaveBeenCalled();
@@ -1475,18 +1495,17 @@ test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   expect(erase.setPreferences).toHaveBeenLastCalledWith('dark', false, true);
   expect(screen.getByText('Could not save')).toBeTruthy();
   await user.press(screen.getByRole('button', { name: 'Privacy policy' }));
-  expect(openUrl).toHaveBeenCalledWith('https://raw.githubusercontent.com/kigya/cutout/92f8bbd300061e94c4fd193644d718eebebb2a94/PRIVACY.md');
+  expect(openUrl).toHaveBeenCalledWith('https://raw.githubusercontent.com/kigya/cutout/f93fef6e20e903c65abd38d6d243b2ea26f8a428/PRIVACY.md');
   expect(screen.queryByText(/images and clipboard content are processed on your device/i)).toBeNull();
   openUrl.mockRejectedValueOnce(new Error('policy cannot open'));
   await user.press(screen.getByRole('button', { name: 'Privacy policy' }));
   await flush();
   expect(screen.getByText('Could not open the privacy policy')).toBeTruthy();
   await user.press(screen.getByRole('button', { name: 'Send feedback' }));
-  expect(openUrl).toHaveBeenCalledWith(expect.stringContaining('mailto:'));
-  openUrl.mockRejectedValueOnce(new Error('no mail app'));
+  expect(screen.getByLabelText('Reply email')).toBeTruthy();
+  await user.press(screen.getByRole('button', { name: 'Back' }));
   await user.press(screen.getByRole('button', { name: 'Send feedback' }));
-  await flush();
-  expect(screen.getByText(/no email app is available/i)).toBeTruthy();
+  await act(async () => { backs.at(-1)?.(); });
   openUrl.mockRestore();
   await user.press(screen.getByRole('button', { name: 'Language' }));
   await user.press(screen.getByRole('button', { name: 'Back' }));
@@ -1537,18 +1556,21 @@ test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   erase.cutClipboard.mockResolvedValueOnce(readySession('manual'));
   await user.press(screen.getByRole('button', { name: 'Cut here' }));
   await user.press(screen.getByRole('button', { name: 'Clipboard' }));
+  await dismissSourceModal();
   await act(async () => { await Promise.resolve(); });
   expect(screen.getByText('Erase the extra or restore an edge')).toBeTruthy();
   await user.press(screen.getByRole('button', { name: 'Back' }));
   erase.pickAndCut.mockResolvedValueOnce(readySession());
   await user.press(screen.getByRole('button', { name: 'Cut here' }));
   await user.press(screen.getByRole('button', { name: 'File' }));
+  await dismissSourceModal();
   await act(async () => { await Promise.resolve(); });
   expect(screen.getByText('Done')).toBeTruthy();
   await act(async () => { backs.at(-1)?.(); });
   erase.pickAndCut.mockResolvedValueOnce(readySession());
   await user.press(screen.getByRole('button', { name: 'Cut here' }));
   await user.press(screen.getByRole('button', { name: 'Gallery' }));
+  await dismissSourceModal();
   await act(async () => { await Promise.resolve(); });
   await user.press(screen.getByRole('button', { name: 'Edit in app' }));
   await act(async () => { backs.at(-1)?.(); });
@@ -1558,3 +1580,21 @@ test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   appState.mockRestore();
   os.restore();
 }, 30000);
+
+
+test('iOS waits for source modal dismissal before presenting a native picker and consumes it once', async () => {
+  jest.replaceProperty(Platform, 'OS', 'ios');
+  const onCut = jest.fn();
+  await render(<LocaleGate><HomeScreen home={home} busy={false} notice="" onRefresh={() => undefined} onSettings={() => undefined} onCut={onCut} /></LocaleGate>);
+  await userEvent.press(screen.getByRole('button', { name: 'Cut here' }));
+  await userEvent.press(screen.getByRole('button', { name: 'Gallery' }));
+  expect(onCut).not.toHaveBeenCalled();
+  await dismissSourceModal();
+  await dismissSourceModal();
+  expect(onCut).toHaveBeenCalledTimes(1);
+  expect(onCut).toHaveBeenCalledWith('gallery');
+  await userEvent.press(screen.getByRole('button', { name: 'Cut here' }));
+  await userEvent.press(screen.getByRole('button', { name: 'Back' }));
+  await dismissSourceModal();
+  expect(onCut).toHaveBeenCalledTimes(1);
+});

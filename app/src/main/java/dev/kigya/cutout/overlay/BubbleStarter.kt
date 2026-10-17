@@ -8,17 +8,20 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class BubbleStarter @Inject constructor(
-    @ApplicationContext private val context: Context,
+class BubbleStarter(
+    private val context: Context,
+    private val io: kotlinx.coroutines.CoroutineDispatcher,
 ) {
-    fun start() {
+    @Inject constructor(@ApplicationContext context: Context) : this(context, kotlinx.coroutines.Dispatchers.IO)
+
+    suspend fun start() = kotlinx.coroutines.withContext(io) {
         ContextCompat.startForegroundService(
             context,
             Intent(context, BubbleService::class.java),
         )
     }
 
-    fun stop() {
+    suspend fun stop() = kotlinx.coroutines.withContext(io) {
         context.stopService(Intent(context, BubbleService::class.java))
     }
 }

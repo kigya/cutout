@@ -1,6 +1,13 @@
-import { applyStroke, applyStrokeInPlace, canCopyEdited, canReplay, opaqueCount, rememberStroke, sameAlpha, strokePoints, viewToBitmap } from './stroke';
+import { applyStroke, applyStrokeInPlace, canCopyEdited, canReplay, containRect, opaqueCount, previousStrokePoint, rememberStroke, sameAlpha, strokePoints, viewToBitmap } from './stroke';
 
 describe('stroke', () => {
+  test('uses the latest sample, or the current point when a gesture has no prior sample', () => {
+    const fallback = { x: 9, y: 7 };
+    expect(previousStrokePoint([], fallback)).toBe(fallback);
+    const previous = { x: 3, y: 2 };
+    expect(previousStrokePoint([{ x: 1, y: 1 }, previous], fallback)).toBe(previous);
+  });
+
   test('stamps along a segment and keeps a zero-length move', () => {
     expect(strokePoints({ x: 0, y: 0 }, { x: 10, y: 0 }, 5)).toEqual([
       { x: 5, y: 0 },
@@ -53,6 +60,14 @@ describe('stroke', () => {
     expect(viewToBitmap(10, 10, 10, 0, 10, 10)).toEqual({ x: 0, y: 0 });
     expect(viewToBitmap(10, 10, 10, 10, 0, 10)).toEqual({ x: 0, y: 0 });
     expect(viewToBitmap(10, 10, 10, 10, 10, 0)).toEqual({ x: 0, y: 0 });
+  });
+
+  test('fits the session pixel frame once and shares that rectangle with touch mapping', () => {
+    expect(containRect(300, 200, 4, 2)).toEqual({ x: 0, y: 25, width: 300, height: 150 });
+    expect(containRect(200, 300, 2, 4)).toEqual({ x: 25, y: 0, width: 150, height: 300 });
+    expect(containRect(0, 300, 2, 4)).toEqual({ x: 0, y: 0, width: 0, height: 0 });
+    expect(viewToBitmap(150, 25, 300, 200, 4, 2)).toEqual({ x: 2, y: 0 });
+    expect(viewToBitmap(150, 100, 300, 200, 4, 2)).toEqual({ x: 2, y: 1 });
   });
 
   test('does not eat the frame from a stamp outside it, and leaves a clear pixel clear', () => {

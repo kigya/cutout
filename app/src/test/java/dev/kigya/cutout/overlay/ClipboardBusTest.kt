@@ -14,6 +14,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ClipboardBusTest {
+    @Test fun deliveredReadCannotEraseARequestStartedByItsCompletion() = runBlocking {
+        val bus = ClipboardBus()
+        val first = bus.awaitConsume()
+        val id = bus.consumeRequestId
+        var next: kotlinx.coroutines.CompletableDeferred<ClipboardLook?>? = null
+        first.invokeOnCompletion { next = bus.awaitConsume() }
+        bus.offer(ClipboardRead(ClipboardLook.Empty, true, id))
+        assertEquals(ClipboardLook.Empty, first.await())
+        assertTrue(bus.consumeRequestId != null && bus.consumeRequestId != id)
+        bus.cancelConsume()
+        assertNull(next!!.await())
+    }
+    @Test fun cancellationCompletionCannotEraseAReentrantNewClipboardRequest() = runBlocking {
+        val bus = ClipboardBus()
+        val old = bus.awaitConsume()
+        var replacement: kotlinx.coroutines.CompletableDeferred<ClipboardLook?>? = null
+        old.invokeOnCompletion { replacement = bus.awaitConsume() }
+        bus.cancelConsume()
+        val expected = ClipboardLook.Found(IncomingImage.Raster(byteArrayOf(9)))
+        assertTrue(bus.consumeRequestId != null)
+        bus.offer(ClipboardRead(expected, true, bus.consumeRequestId))
+        assertEquals(expected, replacement!!.await())
+        assertNull(old.await())
+    }
+
     @Test
     fun lateResultFromCancelledForegroundRequestIsNotEmittedToBubbleFlow() = runBlocking {
         val bus = ClipboardBus()

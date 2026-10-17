@@ -1,4 +1,4 @@
-import { clampPan, clampScale, panForZoom } from './zoom';
+import { clampPan, clampScale, panForZoom, positiveScaleOrOne } from './zoom';
 
 describe('zoom', () => {
   test('scale stays between one and six', () => {
@@ -19,5 +19,11 @@ describe('zoom', () => {
     const next = panForZoom(80, 50, 0, 1, 2);
     expect(next).toBeCloseTo(80 - 50 - (80 - 50) * 2);
     expect(panForZoom(80, 50, 0, 0, 2)).toBeCloseTo(panForZoom(80, 50, 0, 1, 2));
+  });
+
+  test('uses a valid positive drawing scale when gestures report an invalid scale', () => {
+    expect(positiveScaleOrOne(2.5)).toBe(2.5);
+    expect(positiveScaleOrOne(0)).toBe(1);
+    expect(positiveScaleOrOne(-3)).toBe(1);
   });
 });

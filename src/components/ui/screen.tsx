@@ -30,7 +30,7 @@ export function Screen({ children, scroll = false, fullWidth = false }: Props) {
   if (scroll) {
     return (
       <View className="flex-1" style={[bars, { backgroundColor: colors.background }]}>
-        <ScrollView className="flex-1" contentContainerStyle={{ flexGrow: 1 }}>
+        <ScrollView className="flex-1" automaticallyAdjustKeyboardInsets keyboardDismissMode="on-drag" keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1 }}>
           {body}
         </ScrollView>
       </View>

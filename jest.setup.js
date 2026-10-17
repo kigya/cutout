@@ -1,3 +1,21 @@
+// Model the asynchronous native iOS Modal dismissal event explicitly in tests.
+const mockModalDismisses = [];
+global.__modalDismisses = mockModalDismisses;
+jest.mock('react-native/Libraries/Modal/Modal', () => {
+  const React = require('react');
+  class MockModal extends React.Component {
+    componentDidUpdate(previous) {
+      if (previous.visible !== false && this.props.visible === false && this.props.onDismiss) {
+        mockModalDismisses.push(this.props.onDismiss);
+      }
+    }
+    render() {
+      return this.props.visible === false ? null : React.createElement('Modal', this.props, this.props.children);
+    }
+  }
+  return { __esModule: true, default: MockModal };
+});
+
 jest.mock('react-native-css-interop', () => ({
   cssInterop: () => undefined,
   remapProps: () => undefined,
@@ -166,7 +184,15 @@ function mockNode(name) {
 
 jest.mock('@shopify/react-native-skia', () => ({
   Canvas: mockNode('canvas'),
-  Image: mockNode('sk-image'),
+  Image: props => require('react').createElement('View', {
+    testID: 'sk-image',
+    fit: props.fit,
+    blendMode: props.blendMode,
+    x: props.x,
+    y: props.y,
+    width: props.width,
+    height: props.height,
+  }, props.children),
   LinearGradient: mockNode('gradient'),
   Rect: mockNode('rect'),
   Circle: mockNode('circle'),

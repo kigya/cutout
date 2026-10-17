@@ -40,7 +40,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
     }
 
     signingConfigs {
@@ -70,6 +70,11 @@ android {
             )
         }
     }
+
+    // Keep every translation available when the user changes app language offline.
+    bundle { language { enableSplit = false } }
+
+    testOptions { unitTests.isIncludeAndroidResources = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -120,14 +125,35 @@ dependencies {
     implementation(libs.onnxruntime.android)
     implementation(libs.androidsvg)
     implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("com.google.android.play:review:2.0.2")
+    // Host JNI for tests of the same ONNX Java API; never packaged in Android.
+    testRuntimeOnly("com.microsoft.onnxruntime:onnxruntime:1.30.0")
     testImplementation(libs.junit)
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("io.mockk:mockk:1.14.6")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
 }
 
-jacoco { toolVersion = "0.8.14" }
+jacoco { toolVersion = "0.8.15" }
 
-val ownedClasses = fileTree(layout.buildDirectory.dir("intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes")) {
+// Robolectric sandbox classes have no location; keep their owned-code probes.
+// Instrument only app classes to avoid JDK/Android and dependency probes.
+tasks.withType<Test>().configureEach {
+    // Robolectric, bytecode mocks and the bundled model share this one bounded worker.
+    maxHeapSize = "1g"
+    maxParallelForks = 1
+    extensions.configure<JacocoTaskExtension> {
+        isIncludeNoLocationClasses = true
+        includes = listOf("dev.kigya.cutout.*")
+        excludes = listOf("jdk.internal.*")
+    }
+}
+
+val ownedClasses = fileTree(layout.buildDirectory.dir("intermediates/classes/debug/transformDebugClassesWithAsm/dirs")) {
     include("dev/kigya/cutout/**/*.class")
     exclude("**/*_Factory*", "**/Hilt_*", "**/*_GeneratedInjector*", "**/Dagger*", "**/BuildConfig*", "**/*$" + "WhenMappings*")
+    // Generated Hilt/KSP Java classes present only in the post-ASM report directory.
+    exclude("**/EraseApp_HiltComponents*", "**/EraseApp_ComponentTreeDeps*", "**/CoroutineModule_MainImmediateFactory*", "**/*_MembersInjector*")
 }
 val nativeCoverageReport by tasks.registering(JacocoReport::class) {
     dependsOn("testDebugUnitTest")

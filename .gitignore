@@ -45,6 +45,7 @@ app/src/debug/res/
 **/xcuserdata/
 
 .kotlin/
+__pycache__/
 
 # Per-directory files created by the local skill watcher
 **/.agents/

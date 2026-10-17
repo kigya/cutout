@@ -65,13 +65,18 @@ private fun rotate(bitmap: Bitmap, bytes: ByteArray): Bitmap {
     } catch (_: Exception) {
         ExifInterface.ORIENTATION_NORMAL
     }
-    val degrees = when (orientation) {
-        ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-        ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-        ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-        else -> return bitmap
+    val matrix = Matrix().apply {
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> setScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { setRotate(90f); postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_90 -> setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> { setRotate(270f); postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_270 -> setRotate(270f)
+            else -> return bitmap
+        }
     }
-    val matrix = Matrix().apply { postRotate(degrees) }
     val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     if (rotated != bitmap) bitmap.recycle()
     return rotated

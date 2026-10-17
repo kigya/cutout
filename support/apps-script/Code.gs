@@ -12,8 +12,9 @@ function validateFeedback(input) {
   var rating = Number(input.rating);
   var id = String(input.id || '');
   var version = String(input.version || '');
-  if (email.length > 254 || !/^[^\s@<>\r\n]+@[^\s@<>\r\n]+\.[^\s@<>\r\n]+$/.test(email) || message.length < 5 || message.length > 4000 || !Number.isInteger(rating) || rating < 0 || rating > 5 || !/^[a-f0-9-]{36}$/.test(id) || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('INVALID');
-  return {email:email,message:message,rating:rating,id:id,version:version};
+  var platform = String(input.platform || '');
+  if (['android','ios'].indexOf(platform) < 0 || email.length > 254 || !/^[^\s@<>\r\n]+@[^\s@<>\r\n]+\.[^\s@<>\r\n]+$/.test(email) || message.length < 5 || message.length > 4000 || !Number.isInteger(rating) || rating < 0 || rating > 5 || !/^[a-f0-9-]{36}$/.test(id) || !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('INVALID');
+  return {email:email,message:message,rating:rating,id:id,version:version,platform:platform};
 }
 function doPost(event) {
   var lock = LockService.getScriptLock();
@@ -33,7 +34,7 @@ function doPost(event) {
       // Stay below consumer quota; no paid plan or auto-upgrade is used.
       if (count >= 50 || MailApp.getRemainingDailyQuota() < 1) throw new Error('QUOTA');
       props.setProperties({day:today,count:String(count+1)});
-      MailApp.sendEmail({to:RECIPIENT,replyTo:data.email,subject:APP_NAME+' '+data.version+' — feedback'+(data.rating ? ' ('+data.rating+'/5)' : ''),body:'App: '+APP_ID+'\nReply email: '+data.email+'\nRating: '+(data.rating || 'not supplied')+'\nVersion: '+data.version+'\n\n'+data.message});
+      MailApp.sendEmail({to:RECIPIENT,replyTo:data.email,subject:APP_NAME+' '+data.version+' — feedback'+(data.rating ? ' ('+data.rating+'/5)' : ''),body:'App: '+APP_ID+'\nPlatform: '+data.platform+'\nReply email: '+data.email+'\nRating: '+(data.rating || 'not supplied')+'\nVersion: '+data.version+'\n\n'+data.message});
       cache.put(APP_ID+':sent:'+data.id,'1',21600);
       cache.put(APP_ID+':email:'+hash,'1',600);
       response={ok:true,id:data.id};

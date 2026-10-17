@@ -7,6 +7,7 @@ import React
 import WebKit
 import CoreFoundation
 import ImageIO
+import StoreKit
 #if canImport(FirebaseCore) && canImport(FirebaseAnalytics) && canImport(FirebaseCrashlytics) && canImport(FirebaseRemoteConfig)
 import FirebaseCore
 import FirebaseAnalytics
@@ -268,31 +269,59 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
 
   @objc(publishPng:resolver:rejecter:)
   func publishPng(_ path: String, resolver resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
-    guard let image = UIImage(contentsOfFile: path), let cg = image.cgImage else { resolve("failed"); return }
+    guard let image = UIImage(contentsOfFile: path), let cg = image.cgImage else {
+      recordProductEvent(name: "export_failed", values: ["action": "copy", "format": "png"] as NSDictionary)
+      resolve("failed")
+      return
+    }
     var rgba = [UInt8](repeating: 0, count: cg.width * cg.height * 4)
     guard let ctx = CGContext(data: &rgba, width: cg.width, height: cg.height, bitsPerComponent: 8, bytesPerRow: cg.width * 4,
-      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { resolve("failed"); return }
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+      recordProductEvent(name: "export_failed", values: ["action": "copy", "format": "png"] as NSDictionary)
+      resolve("failed")
+      return
+    }
     ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
     let opaque = stride(from: 3, to: rgba.count, by: 4).reduce(0) { $0 + (rgba[$1] >= 8 ? 1 : 0) }
-    guard opaque > 0, let data = image.pngData() else { resolve("empty"); return }
+    guard opaque > 0, let data = image.pngData() else {
+      recordProductEvent(name: "export_failed", values: ["action": "copy", "format": "png"] as NSDictionary)
+      resolve("empty")
+      return
+    }
     UIPasteboard.general.setData(data, forPasteboardType: UTType.png.identifier)
+    recordProductEvent(name: "export_completed", values: ["action": "copy", "format": "png"] as NSDictionary)
     resolve("copied")
+    IOSReviewPrompts.exportSucceeded()
   }
 
   @objc(saveToGallery:resolver:rejecter:)
   func saveToGallery(_ path: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
     let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
     let save: () -> Void = {
-      guard let image = UIImage(contentsOfFile: path) else { resolve("failed"); return }
+      guard let image = UIImage(contentsOfFile: path) else {
+        self.recordProductEvent(name: "export_failed", values: ["action": "save", "format": "png"] as NSDictionary)
+        resolve("failed")
+        return
+      }
       PHPhotoLibrary.shared().performChanges({ PHAssetChangeRequest.creationRequestForAsset(from: image) }) { ok, _ in
-        DispatchQueue.main.async { resolve(ok ? "saved" : "failed") }
+        DispatchQueue.main.async {
+          self.recordProductEvent(name: ok ? "export_completed" : "export_failed",
+                                  values: ["action": "save", "format": "png"] as NSDictionary)
+          resolve(ok ? "saved" : "failed")
+          if ok { IOSReviewPrompts.exportSucceeded() }
+        }
       }
     }
-    if status == .authorized || status == .limited { save(); return }
-    guard status == .notDetermined else { resolve("denied"); return }
-    PHPhotoLibrary.requestAuthorization(for: .addOnly) { result in
-      self.recordProductEvent(name: "permission_result", values: ["permission": "photos_add", "result": result == .authorized ? "granted" : "denied"] as NSDictionary)
-      DispatchQueue.main.async { result == .authorized ? save() : resolve("denied") }
+    switch PhotoAddAuthorizationPolicy.disposition(for: status) {
+    case .save:
+      save()
+    case .deny:
+      resolve("denied")
+    case .request:
+      PHPhotoLibrary.requestAuthorization(for: .addOnly) { result in
+        self.recordProductEvent(name: "permission_result", values: ["permission": "photos_add", "result": result == .authorized ? "granted" : "denied"] as NSDictionary)
+        DispatchQueue.main.async { result == .authorized ? save() : resolve("denied") }
+      }
     }
   }
 
@@ -335,21 +364,9 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
 
   private func recordProductEvent(name: String, values: NSDictionary) {
     #if canImport(FirebaseCore) && canImport(FirebaseAnalytics) && canImport(FirebaseCrashlytics) && canImport(FirebaseRemoteConfig)
-    let events: Set<String> = ["screen_view", "screen_duration", "cutout_started", "cutout_completed", "cutout_failed", "cutout_cancelled", "editor_action", "export_completed", "export_failed", "bubble_changed", "permission_result", "locale_changed"]
-    let fields: Set<String> = ["screen_name", "duration_ms", "source", "surface", "format", "action", "result", "permission", "enabled", "locale", "stage"]
-    if UserDefaults.standard.bool(forKey: "erase.analytics"), events.contains(name), FirebaseApp.app() != nil {
-      var parameters: [String: Any] = [:]
-      for (rawKey, value) in values {
-        guard let key = rawKey as? String, fields.contains(key) else { continue }
-        if let string = value as? String {
-          if string.count <= 40 && string.range(of: #"^[a-zA-Z0-9_.-]+$"#, options: .regularExpression) != nil { parameters[key] = string }
-        } else if let number = value as? NSNumber {
-          if CFGetTypeID(number) == CFBooleanGetTypeID() { parameters[key] = number.boolValue ? 1 : 0 }
-          else if number.doubleValue.isFinite { parameters[key] = number }
-        }
-      }
-      Analytics.logEvent(name, parameters: parameters)
-    }
+    guard UserDefaults.standard.bool(forKey: "erase.analytics"), FirebaseApp.app() != nil,
+          let parameters = ProductTelemetryPolicy.sanitizedParameters(name: name, values: values) else { return }
+    Analytics.logEvent(name, parameters: parameters)
     #endif
   }
 
@@ -631,7 +648,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     job.1(["status": "failed", "message": isCurrentCut(token) ? message : "cancelled"])
   }
 
-  private func stripSolidBackdrop(_ svg: String) -> String? {
+  func stripSolidBackdrop(_ svg: String) -> String? {
     guard let boxMatch = svg.range(of: #"viewBox\s*=\s*[\"']([^\"']+)[\"']"#, options: .regularExpression),
           let rectMatch = svg.range(of: #"<rect\b[^>]*>"#, options: [.regularExpression, .caseInsensitive]) else { return nil }
     let boxTag = String(svg[boxMatch])
@@ -869,5 +886,91 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
 
   private func emitPreview(_ path: String) {
     DispatchQueue.main.async { self.sendEvent(withName: "erasePreview", body: ["path": path]) }
+  }
+}
+
+enum PhotoAddAuthorizationPolicy {
+  enum Disposition: Equatable { case save, request, deny }
+
+  static func disposition(for status: PHAuthorizationStatus) -> Disposition {
+    switch status {
+    case .authorized, .limited: return .save
+    case .notDetermined: return .request
+    case .denied, .restricted: return .deny
+    @unknown default: return .deny
+    }
+  }
+}
+
+enum ProductTelemetryPolicy {
+  private static let events: Set<String> = ["screen_view", "screen_duration", "cutout_started", "cutout_completed", "cutout_failed", "cutout_cancelled", "editor_action", "export_completed", "export_failed", "bubble_changed", "permission_result", "locale_changed"]
+  private static let fields: Set<String> = ["screen_name", "duration_ms", "source", "surface", "format", "action", "result", "permission", "enabled", "locale", "stage"]
+
+  static func sanitizedParameters(name: String, values: NSDictionary) -> [String: Any]? {
+    guard events.contains(name) else { return nil }
+    var parameters: [String: Any] = [:]
+    for (rawKey, value) in values {
+      guard let key = rawKey as? String, fields.contains(key) else { continue }
+      if let string = value as? String {
+        if string.count <= 40 && string.range(of: #"^[a-zA-Z0-9_.-]+$"#, options: .regularExpression) != nil { parameters[key] = string }
+      } else if let number = value as? NSNumber {
+        if CFGetTypeID(number) == CFBooleanGetTypeID() { parameters[key] = number.boolValue ? 1 : 0 }
+        else if number.doubleValue.isFinite { parameters[key] = number }
+      }
+    }
+    return parameters
+  }
+}
+
+enum ReviewPromptPolicy {
+  static func isEligible(exports: Int, now: TimeInterval, lastAttempt: TimeInterval,
+                         minimumExports: Int, cooldownDays: Int) -> Bool {
+    let threshold = (3...1000).contains(minimumExports) ? minimumExports : 5
+    let days = (30...365).contains(cooldownDays) ? cooldownDays : 90
+    guard exports >= threshold, now.isFinite, now >= 0 else { return false }
+    if lastAttempt == 0 { return true }
+    return now >= lastAttempt && now - lastAttempt >= TimeInterval(days) * 86_400
+  }
+}
+
+private enum IOSReviewPrompts {
+  private static let lock = NSLock()
+  private static let exportCountKey = "erase.review.exports"
+  private static let lastAttemptKey = "erase.review.lastAttempt"
+
+  static func exportSucceeded() {
+    DispatchQueue.main.async {
+      let defaults = UserDefaults.standard
+      lock.lock()
+      let exports = max(0, defaults.integer(forKey: exportCountKey)) + 1
+      defaults.set(exports, forKey: exportCountKey)
+
+      let now = Date().timeIntervalSince1970
+      var minimumExports = 5
+      var cooldownDays = 90
+      #if canImport(FirebaseCore) && canImport(FirebaseAnalytics) && canImport(FirebaseCrashlytics) && canImport(FirebaseRemoteConfig)
+      if defaults.bool(forKey: "erase.analytics"), FirebaseApp.app() != nil {
+        let remote = RemoteConfig.remoteConfig()
+        minimumExports = remote.configValue(forKey: "review_min_exports").numberValue.intValue
+        cooldownDays = remote.configValue(forKey: "review_cooldown_days").numberValue.intValue
+      }
+      #endif
+
+      let lastAttempt = defaults.double(forKey: lastAttemptKey)
+      guard UIApplication.shared.applicationState == .active,
+            let scene = UIApplication.shared.connectedScenes
+              .compactMap({ $0 as? UIWindowScene })
+              .first(where: { $0.activationState == .foregroundActive }),
+            ReviewPromptPolicy.isEligible(exports: exports, now: now, lastAttempt: lastAttempt,
+                                          minimumExports: minimumExports, cooldownDays: cooldownDays) else {
+        lock.unlock()
+        return
+      }
+
+      // Record an attempt, not a rating or whether StoreKit showed a prompt.
+      defaults.set(now, forKey: lastAttemptKey)
+      lock.unlock()
+      SKStoreReviewController.requestReview(in: scene)
+    }
   }
 }

@@ -21,13 +21,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Node.js 22.11.0
+      - name: Install Node.js 22.23.2
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22.11.0
+          node-version: 22.23.2
 
       - name: Run local quality checks
         run: scripts/check-local.sh --skip-security
+
+      - name: Preserve JavaScript coverage evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: javascript-coverage
+          path: coverage/coverage-summary.json
+          retention-days: 7
 
   security:
     name: Secrets and workflow security scan
@@ -72,10 +80,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Node.js 22.11.0
+      - name: Install Node.js 22.23.2
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22.11.0
+          node-version: 22.23.2
 
       - name: Install JDK 17
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -101,6 +109,33 @@ jobs:
       - name: Build optimized release and enforce native line/branch coverage
         run: ./gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:nativeCoverageCheck :app:assembleRelease
 
+      - name: Scan mobile source and effective Android permissions
+        env:
+          SEMGREP_SEND_METRICS: 'off'
+          SEMGREP_ENABLE_VERSION_CHECK: '0'
+        run: |
+          python3 -m venv /tmp/cutout-mobile-sast
+          /tmp/cutout-mobile-sast/bin/pip install mobsfscan==1.0.1
+          /tmp/cutout-mobile-sast/bin/mobsfscan --json --type android -o /tmp/cutout-android-sast.json app/src/main/java app/src/main/res app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml
+          /tmp/cutout-mobile-sast/bin/mobsfscan --json --type ios -o /tmp/cutout-ios-sast.json ios/Cutout
+          python3 scripts/check-mobile-sast.py --manifest app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml /tmp/cutout-android-sast.json /tmp/cutout-ios-sast.json
+
+      - name: Record release build checksum
+        run: sha256sum app/build/outputs/apk/release/app-release.apk > app/build/outputs/apk/release/app-release.apk.sha256
+
+      - name: Preserve native and security verification evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-native-security-evidence
+          path: |
+            app/build/reports/jacoco/nativeCoverageReport/nativeCoverageReport.xml
+            app/build/test-results/testDebugUnitTest/*.xml
+            app/build/outputs/apk/release/app-release.apk.sha256
+            /tmp/cutout-android-sast.json
+            /tmp/cutout-ios-sast.json
+          retention-days: 7
+
   ios:
     name: iOS unsigned Release build
     runs-on: macos-15
@@ -117,10 +152,10 @@ jobs:
           sudo xcode-select --switch /Applications/Xcode_26.3.app
           xcodebuild -version
 
-      - name: Install Node.js 22.11.0
+      - name: Install Node.js 22.23.2
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22.11.0
+          node-version: 22.23.2
 
       - name: Install locked JavaScript dependencies
         run: npm ci

@@ -14,6 +14,31 @@ export type StrokeHistory = {
   index: number;
 };
 
+export function commitStrokeHistory(
+  history: StrokeHistory | null,
+  stroke: MaskStroke,
+  width: number,
+  height: number,
+  applyMask: () => boolean,
+  commit: (next: StrokeHistory) => void,
+): boolean {
+  if (!history || !applyMask()) return false;
+  commit(appendStroke(history, stroke, width, height));
+  return true;
+}
+
+export function undoStrokeHistory(history: StrokeHistory | null, replay: (index: number) => void): boolean {
+  if (!history || history.index <= 0) return false;
+  replay(history.index - 1);
+  return true;
+}
+
+export function redoStrokeHistory(history: StrokeHistory | null, replay: (index: number) => void): boolean {
+  if (!history || history.index >= history.strokes.length) return false;
+  replay(history.index + 1);
+  return true;
+}
+
 export function appendStroke(history: StrokeHistory, stroke: MaskStroke, width: number, height: number): StrokeHistory {
   const strokes = history.strokes.slice(0, history.index);
   strokes.push(stroke);

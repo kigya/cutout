@@ -17,38 +17,45 @@ class PickBus @Inject constructor() {
     private var editorActivity: java.lang.ref.WeakReference<android.app.Activity>? = null
     private val editorSlot = AtomicReference<CompletableDeferred<IncomingImage?>?>(null)
 
-    fun awaitEditor(): CompletableDeferred<IncomingImage?> {
-        cancel(TARGET_EDITOR)
+    @Synchronized fun awaitEditor(): CompletableDeferred<IncomingImage?> {
         val deferred = CompletableDeferred<IncomingImage?>()
+        val previous = editorSlot.getAndSet(deferred)
+        val previousActivity = editorActivity?.get()
+        editorActivity = null
         editorRequestId = java.util.UUID.randomUUID().toString()
-        editorSlot.getAndSet(deferred)?.cancel()
+        // Publish the replacement before resuming the old caller: completion can reenter this bus.
+        previous?.complete(null)
+        previousActivity?.runOnUiThread { previousActivity.finish() }
         return deferred
     }
 
-    fun attachEditor(activity: android.app.Activity, requestId: String?): Boolean {
+    @Synchronized fun attachEditor(activity: android.app.Activity, requestId: String?): Boolean {
         if (requestId == null || requestId != editorRequestId || editorSlot.get() == null) return false
         editorActivity = java.lang.ref.WeakReference(activity)
         return true
     }
 
-    fun offer(image: IncomingImage, target: String, requestId: String? = null) {
+    @Synchronized fun offer(image: IncomingImage, target: String, requestId: String? = null) {
         if (target == TARGET_EDITOR) {
             if (requestId != null && requestId == editorRequestId) {
-                editorSlot.getAndSet(null)?.complete(image)
+                val pending = editorSlot.getAndSet(null)
                 editorRequestId = null
+                pending?.complete(image)
             }
         } else {
             bubbleFlow.tryEmit(image)
         }
     }
 
-    fun cancel(target: String, requestId: String? = null) {
+    @Synchronized fun cancel(target: String, requestId: String? = null) {
         if (target == TARGET_EDITOR) {
             if (requestId != null && requestId != editorRequestId) return
-            editorSlot.getAndSet(null)?.complete(null)
+            val pending = editorSlot.getAndSet(null)
+            val owner = editorActivity?.get()
             editorRequestId = null
-            editorActivity?.get()?.let { activity -> activity.runOnUiThread { activity.finish() } }
             editorActivity = null
+            pending?.complete(null)
+            owner?.runOnUiThread { owner.finish() }
         } else {
             bubbleFlow.tryEmit(null)
         }

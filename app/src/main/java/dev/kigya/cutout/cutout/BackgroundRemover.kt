@@ -56,15 +56,20 @@ class BackgroundRemover @Inject constructor(
 
     private fun open() {
         val env = environment ?: OrtEnvironment.getEnvironment().also { environment = it }
-        val options = OrtSession.SessionOptions()
-        options.setIntraOpNumThreads(2)
-        options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-        val bytes = context.assets.open(MODEL).use { it.readBytes() }
-        // PRD deviation: ISNet at 1024 (MIT, imgly/isnet-general-onnx), not center-point MagicTouch.
-        // silueta kept cast shadows. Inference stays on device.
-        val created = env.createSession(bytes, options)
-        session = created
-        inputName = created.inputNames.first()
+        val created = OrtSession.SessionOptions().use { options ->
+            options.setIntraOpNumThreads(2)
+            options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+            val bytes = context.assets.open(MODEL).use { it.readBytes() }
+            // ISNet at 1024 (MIT, imgly/isnet-general-onnx); inference stays on device.
+            env.createSession(bytes, options)
+        }
+        try {
+            inputName = created.inputNames.first()
+            session = created
+        } catch (error: Exception) {
+            created.close()
+            throw error
+        }
     }
 
     private fun segment(engine: OrtSession, name: String, source: Bitmap): Removal {
@@ -100,24 +105,22 @@ class BackgroundRemover @Inject constructor(
             FloatBuffer.wrap(chw),
             longArrayOf(1, 3, INPUT.toLong(), INPUT.toLong()),
         )
-        val result = engine.run(mapOf(name to input))
-        try {
-            val output = result.get(0) as? OnnxTensor ?: return Removal.SubjectNotFound
-            val info = output.info as? TensorInfo ?: return Removal.Broken("mask")
-            val height = info.shape[info.shape.size - 2].toInt()
-            val width = info.shape[info.shape.size - 1].toInt()
-            val buffer = output.floatBuffer
-            buffer.rewind()
-            val raw = FloatArray(buffer.remaining())
-            buffer.get(raw)
-            if (raw.size < width * height || width <= 0 || height <= 0) return Removal.Broken("mask")
-            val confidence = stretchUnit(raw.copyOf(width * height))
-            val fraction = MaskPolicy.foregroundFraction(confidence)
-            if (!MaskPolicy.evaluate(fraction).usable) return Removal.SubjectNotFound
-            return paint(frame, confidence, width, height)
-        } finally {
-            result.close()
-            input.close()
+        input.use {
+            engine.run(mapOf(name to input)).use { result ->
+                val output = result.get(0) as? OnnxTensor ?: return Removal.SubjectNotFound
+                val info = output.info as? TensorInfo ?: return Removal.Broken("mask")
+                val height = info.shape[info.shape.size - 2].toInt()
+                val width = info.shape[info.shape.size - 1].toInt()
+                val buffer = output.floatBuffer
+                buffer.rewind()
+                val raw = FloatArray(buffer.remaining())
+                buffer.get(raw)
+                if (raw.size < width * height || width <= 0 || height <= 0) return Removal.Broken("mask")
+                val confidence = stretchUnit(raw.copyOf(width * height))
+                val fraction = MaskPolicy.foregroundFraction(confidence)
+                if (!MaskPolicy.evaluate(fraction).usable) return Removal.SubjectNotFound
+                return paint(frame, confidence, width, height)
+            }
         }
     }
 

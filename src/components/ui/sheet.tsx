@@ -36,9 +36,10 @@ export function Sheet({ title, body, visible, closeLabel, onClose, actionLabel, 
   }));
   return (
     <Modal animationType="none" transparent visible={visible} onRequestClose={onClose}>
-      <Pressable accessibilityRole="button" className="flex-1 justify-end" style={{ backgroundColor: colors.scrim }} onPress={onClose}>
+      <Pressable accessible={false} className="flex-1 justify-end" style={{ backgroundColor: colors.scrim }} onPress={onClose}>
         <Animated.View style={sheetStyle}>
         <Pressable
+          accessible={false}
           className="rounded-t-3xl border"
           style={{
             maxHeight: height - insets.top - SYSTEM_BAR_GAP,

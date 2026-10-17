@@ -15,6 +15,7 @@ export const LICENSES: readonly LicenseEntry[] = [
   { name: 'React Native Gesture Handler', license: 'MIT' },
   { name: 'React Native Reanimated', license: 'MIT' },
   { name: 'Firebase SDKs', license: 'Apache-2.0' },
+  { name: 'Google Play In-App Review (Android)', license: 'Google Play Core SDK Terms of Service — https://developer.android.com/guide/playcore/license' },
 ];
 
 const REQUIRED = ['ONNX Runtime', 'ISNet', 'AndroidSVG', 'React Native', 'Hermes', 'React Native Reusables'];

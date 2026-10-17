@@ -68,6 +68,7 @@ class EraseModule(
 ) : ReactContextBaseJavaModule(reactContext) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var cutJob: Job? = null
+    private val reviews by lazy { dev.kigya.cutout.data.ReviewPrompts(reactApplicationContext) }
     private val telemetry by lazy { dev.kigya.cutout.data.AppTelemetry(reactApplicationContext) }
 
     init {
@@ -126,9 +127,23 @@ class EraseModule(
     @ReactMethod
     fun getHome(promise: Promise) {
         scope.launch {
-            val enabled = preferences.enabled.first()
-            syncBubble(enabled)
-            promise.resolve(homeMap(enabled))
+            try {
+                var enabled = preferences.enabled.first()
+                try {
+                    val active = syncBubble(enabled)
+                    if (enabled && !active) preferences.setEnabled(false)
+                    enabled = active
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) {
+                    disableBubbleAfterFailure()
+                    enabled = false
+                }
+                val rows = withContext(Dispatchers.IO) { permissions.snapshot() }
+                promise.resolve(homeMap(enabled, rows))
+            } catch (cancelled: CancellationException) {
+                promise.reject("cancelled", "Home refresh cancelled")
+                throw cancelled
+            } catch (_: Exception) { promise.reject("home", "Could not refresh permissions") }
         }
     }
 
@@ -148,24 +163,40 @@ class EraseModule(
     @ReactMethod
     fun setBubble(enabled: Boolean, promise: Promise) {
         scope.launch {
-            val allowed = !enabled || permissions.snapshot().any {
-                it.kind == PermissionKind.Overlay && it.status == GrantStatus.Granted
+            try {
+                val allowed = !enabled || withContext(Dispatchers.IO) { permissions.snapshot() }.any {
+                    it.kind == PermissionKind.Overlay && it.status == GrantStatus.Granted
+                }
+                val active = enabled && allowed
+                preferences.setEnabled(active)
+                syncBubble(active)
+                telemetry.event("bubble_changed", mapOf("enabled" to active))
+                promise.resolve(null)
+            } catch (cancelled: CancellationException) {
+                promise.reject("cancelled", "Bubble change cancelled")
+                throw cancelled
+            } catch (_: Exception) {
+                try { disableBubbleAfterFailure() }
+                finally { promise.reject("bubble", "Could not change Bubble") }
             }
-            val active = enabled && allowed
-            preferences.setEnabled(active)
-            syncBubble(active)
-            telemetry.event("bubble_changed", mapOf("enabled" to active))
-            promise.resolve(null)
         }
     }
 
     @ReactMethod
     fun hideBubble(promise: Promise) {
         scope.launch {
-            preferences.setEnabled(false)
-            telemetry.event("bubble_changed", mapOf("enabled" to false))
-            bubble.stop()
-            promise.resolve(null)
+            try {
+                preferences.setEnabled(false)
+                bubble.stop()
+                telemetry.event("bubble_changed", mapOf("enabled" to false))
+                promise.resolve(null)
+            } catch (cancelled: CancellationException) {
+                promise.reject("cancelled", "Bubble change cancelled")
+                throw cancelled
+            } catch (_: Exception) {
+                try { disableBubbleAfterFailure() }
+                finally { promise.reject("bubble", "Could not change Bubble") }
+            }
         }
     }
 
@@ -309,31 +340,34 @@ class EraseModule(
         scope.launch {
             if (android.os.Build.VERSION.SDK_INT <= 28) {
                 val request = dev.kigya.cutout.overlay.LegacyExportActivity.reserve()
-                if (request == null) { promise.resolve("failed"); return@launch }
-                try {
+                if (request == null) { completeSave(false, promise); return@launch }
+                val saved = try {
                     val intent = android.content.Intent(reactApplicationContext, dev.kigya.cutout.overlay.LegacyExportActivity::class.java)
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("path", path)
                     reactApplicationContext.startActivity(intent)
-                    promise.resolve(withTimeoutOrNull(300_000) { request.await() } ?: "failed")
+                    withTimeoutOrNull(300_000) { request.await() } == "saved"
                 } catch (cancelled: CancellationException) {
-                    promise.resolve("failed")
+                    completeSave(false, promise)
                     throw cancelled
-                } catch (_: Exception) {
-                    promise.resolve("failed")
-                } finally { dev.kigya.cutout.overlay.LegacyExportActivity.cancel(request) }
+                } catch (_: Exception) { false }
+                finally { dev.kigya.cutout.overlay.LegacyExportActivity.cancel(request) }
+                completeSave(saved, promise)
                 return@launch
             }
-            try {
-                val saved = withContext(Dispatchers.IO) { gallery.savePng(path) }
-                telemetry.event(if (saved) "export_completed" else "export_failed", mapOf("action" to "save", "format" to "png"))
-            promise.resolve(if (saved) "saved" else "failed")
+            val saved = try {
+                withContext(Dispatchers.IO) { gallery.savePng(path) }
             } catch (cancelled: CancellationException) {
                 promise.reject("cancelled", "Save cancelled")
                 throw cancelled
-            } catch (_: Exception) {
-                promise.resolve("failed")
-            }
+            } catch (_: Exception) { false }
+            completeSave(saved, promise)
         }
+    }
+
+    private fun completeSave(saved: Boolean, promise: Promise) {
+        telemetry.event(if (saved) "export_completed" else "export_failed", mapOf("action" to "save", "format" to "png"))
+        promise.resolve(if (saved) "saved" else "failed")
+        if (saved) reviews.exportSucceeded(reactApplicationContext.currentActivity)
     }
 
     @ReactMethod
@@ -374,6 +408,7 @@ class EraseModule(
                 val status = withContext(Dispatchers.Default) { masks.publish(path) }
                 telemetry.event(if (status == "copied") "export_completed" else "export_failed", mapOf("action" to "copy", "format" to "png"))
                 promise.resolve(status)
+                if (status == "copied") reviews.exportSucceeded(reactApplicationContext.currentActivity)
             } catch (cancelled: CancellationException) { promise.reject("cancelled", "Copy cancelled"); throw cancelled }
             catch (_: Exception) { promise.resolve("failed") }
         }
@@ -453,17 +488,27 @@ class EraseModule(
         }
     }
 
-    private fun syncBubble(enabled: Boolean) {
-        val overlay = permissions.snapshot().any { snapshot ->
-            snapshot.kind == PermissionKind.Overlay && snapshot.status == GrantStatus.Granted
-        }
-        if (enabled && overlay) bubble.start() else bubble.stop()
+    private suspend fun disableBubbleAfterFailure() {
+        try { preferences.setEnabled(false) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* A storage failure must not leave the bridge promise pending. */ }
+        try { bubble.stop() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* OEM service rejection is reported through the settled caller. */ }
     }
 
-    private fun homeMap(bubbleEnabled: Boolean): WritableMap {
+    private suspend fun syncBubble(enabled: Boolean): Boolean {
+        val overlay = enabled && withContext(Dispatchers.IO) {
+            android.provider.Settings.canDrawOverlays(reactApplicationContext)
+        }
+        if (overlay) bubble.start() else bubble.stop()
+        return overlay
+    }
+
+    private fun homeMap(bubbleEnabled: Boolean, snapshot: List<dev.kigya.cutout.permissions.PermissionSnapshot>): WritableMap {
         val family = permissions.family()
         val rows = Arguments.createArray()
-        permissions.snapshot().forEach { snapshot ->
+        snapshot.forEach { snapshot ->
             val previous = permissionStates.put(snapshot.kind, snapshot.status)
             if (previous != null && previous != snapshot.status) {
                 telemetry.event("permission_result", mapOf("permission" to kindName(snapshot.kind), "result" to statusName(snapshot.status)))

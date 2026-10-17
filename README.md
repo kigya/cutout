@@ -30,7 +30,7 @@ Optional Firebase usage analytics and crash reporting are off by default and hav
 
 ## Build from source
 
-Use Node.js 22.11 or newer, JDK 17, and the Android SDK. Android currently uses compile SDK 37 and targets SDK 36.
+Use Node.js 22.13 or later in the 22.x series, 24.3 or later in the 24.x series, or 26+. CI uses Node.js 22.23.2. You also need JDK 17 and the Android SDK. Android uses compile SDK 37 and targets SDK 36.
 
 ```sh
 npm ci

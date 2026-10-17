@@ -1,9 +1,10 @@
-export type AppRoute = 'home' | 'settings' | 'language' | 'processing' | 'result' | 'editor';
+export type AppRoute = 'home' | 'feedback' | 'settings' | 'language' | 'processing' | 'result' | 'editor';
 
 export function backTarget(route: AppRoute): AppRoute | null {
   switch (route) {
     case 'home':
       return null;
+    case 'feedback':
     case 'language':
       return 'settings';
     case 'settings':

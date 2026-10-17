@@ -13,6 +13,32 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PickBusTest {
+    @Test fun deliveredResultCannotEraseARequestStartedByItsCompletion() = runBlocking {
+        val bus = PickBus()
+        val first = bus.awaitEditor()
+        val id = bus.editorRequestId
+        var next: kotlinx.coroutines.CompletableDeferred<IncomingImage?>? = null
+        first.invokeOnCompletion { next = bus.awaitEditor() }
+        val image = IncomingImage.Raster(byteArrayOf(3))
+        bus.offer(image, PickBus.TARGET_EDITOR, id)
+        assertEquals(image, first.await())
+        assertTrue(bus.editorRequestId != null && bus.editorRequestId != id)
+        bus.cancel(PickBus.TARGET_EDITOR)
+        assertNull(next!!.await())
+    }
+    @Test fun cancellationCompletionCannotEraseAReentrantNewPickerRequest() = runBlocking {
+        val bus = PickBus()
+        val old = bus.awaitEditor()
+        var replacement: kotlinx.coroutines.CompletableDeferred<IncomingImage?>? = null
+        old.invokeOnCompletion { replacement = bus.awaitEditor() }
+        bus.cancel(PickBus.TARGET_EDITOR)
+        val expected = IncomingImage.Raster(byteArrayOf(9))
+        assertTrue(bus.editorRequestId != null)
+        bus.offer(expected, PickBus.TARGET_EDITOR, bus.editorRequestId)
+        assertEquals(expected, replacement!!.await())
+        assertNull(old.await())
+    }
+
     @Test
     fun lateCancelledEditorPickDoesNotEnterBubbleFlow() = runBlocking {
         val bus = PickBus()

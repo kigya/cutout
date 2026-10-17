@@ -1,0 +1,20 @@
+{
+  "reviewedOn": "2026-10-17",
+  "expiresOn": "2026-11-01",
+  "advisories": {
+    "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm": {
+      "package": "braces",
+      "versions": ["3.0.3"],
+      "severity": "high",
+      "disposition": "build-input-only",
+      "reason": "No upstream patched release. NativeWind/Tailwind uses fixed repository-owned content globs; no photo, clipboard, network or feedback input reaches this Node build tool. Braces must be absent from both platform runtime bundle source maps. Repository changes already execute trusted build scripts; builds must not consume untrusted configuration."
+    },
+    "https://github.com/advisories/GHSA-hp3w-g68c-fv3c": {
+      "package": "sprintf-js",
+      "versions": ["1.0.3"],
+      "severity": "moderate",
+      "disposition": "test-tool-only",
+      "reason": "No upstream patched release. Only the Jest/Istanbul CLI chain uses this formatter with repository-owned configuration. It must remain a dev dependency and absent from both platform runtime bundle source maps."
+    }
+  }
+}

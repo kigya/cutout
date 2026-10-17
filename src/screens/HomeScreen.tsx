@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { AppState, Modal, PermissionsAndroid, Platform, Pressable, Switch, Text, View } from 'react-native';
 import { Badge } from '../components/ui/badge';
 import { BubbleDemo } from '../components/BubbleDemo';
@@ -32,6 +32,7 @@ export function HomeScreen({ home, busy, notice, onRefresh, onSettings, onCut }:
   const insets = useSystemBars();
   const [sheet, setSheet] = useState<PermissionKind | null>(null);
   const [sources, setSources] = useState(false);
+  const pendingSource = useRef<Source | null>(null);
   const [overlayInfo, setOverlayInfo] = useState(false);
   const [pendingEnable, setPendingEnable] = useState(false);
   const [showBubbleDemo, setShowBubbleDemo] = useState(true);
@@ -87,7 +88,20 @@ export function HomeScreen({ home, busy, notice, onRefresh, onSettings, onCut }:
   }, [onRefresh, pendingEnable]);
 
   function closeSources() {
+    pendingSource.current = null;
     setSources(false);
+  }
+
+  function chooseSource(source: Source) {
+    if (Platform.OS === 'ios') pendingSource.current = source;
+    setSources(false);
+    if (Platform.OS !== 'ios') onCut(source);
+  }
+
+  function sourceDismissed() {
+    const next = pendingSource.current;
+    pendingSource.current = null;
+    if (next) onCut(next);
   }
 
   return (
@@ -158,10 +172,9 @@ export function HomeScreen({ home, busy, notice, onRefresh, onSettings, onCut }:
         onAction={() => { void enableBubble(); }}
         onClose={() => setOverlayInfo(false)}
       />
-      <Modal transparent animationType="none" visible={sources} onRequestClose={closeSources}>
+      <Modal transparent animationType="none" visible={sources} onDismiss={sourceDismissed} onRequestClose={closeSources}>
         <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('choosePicture')}
+          accessible={false}
           className="flex-1 justify-end"
           style={{
             backgroundColor: colors.scrim,
@@ -171,17 +184,18 @@ export function HomeScreen({ home, busy, notice, onRefresh, onSettings, onCut }:
             paddingRight: insets.right + 20,
           }}
           onPress={closeSources}>
-          <Pressable className="rounded-3xl border p-4" style={{ backgroundColor: colors.surface, borderColor: colors.border }} onPress={() => undefined}>
+          <Pressable accessible={false} className="rounded-3xl border p-4" style={{ backgroundColor: colors.surface, borderColor: colors.border }} onPress={() => undefined}>
             <Text className="mb-3 text-lg font-semibold" style={{ color: colors.text }}>{t('choosePicture')}</Text>
             <View className="gap-2">
-              <Button label={t('gallery')} onPress={() => { setSources(false); onCut('gallery'); }} />
-              <Button label={t('file')} tone="ghost" onPress={() => { setSources(false); onCut('file'); }} />
+              <Button label={t('gallery')} onPress={() => chooseSource('gallery')} />
+              <Button label={t('file')} tone="ghost" onPress={() => chooseSource('file')} />
               <Button
                 label={t('clipboard')}
                 tone="ghost"
                 disabled={!canUseClipboard(home.clipboardReady)}
-                onPress={() => { setSources(false); onCut('clipboard'); }}
+                onPress={() => chooseSource('clipboard')}
               />
+              <Button label={t('back')} tone="ghost" onPress={closeSources} />
             </View>
           </Pressable>
         </Pressable>

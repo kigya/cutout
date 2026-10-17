@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00E356ED1AD99517003FC880 /* CutoutNativeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00E356ED1AD99517003FC889 /* CutoutNativeTests.swift */; };
+		00E356ED1AD99517003FC881 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00E356ED1AD99517003FC882 /* XCTest.framework */; };
+		00E356ED1AD99517003FC920 /* CutoutGalleryFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00E356ED1AD99517003FC929 /* CutoutGalleryFlowTests.swift */; };
+		00E356ED1AD99517003FC921 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 00E356ED1AD99517003FC882 /* XCTest.framework */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
@@ -18,15 +22,52 @@
 		FB47C73DA4A008612C7C74C7 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		00E356ED1AD99517003FC888 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 13B07F861A680F5B00A75B9A;
+			remoteInfo = Cutout;
+		};
+		00E356ED1AD99517003FC928 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 13B07F861A680F5B00A75B9A;
+			remoteInfo = Cutout;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		00E356ED1AD99517003FC885 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		00E356ED1AD99517003FC882 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		00E356ED1AD99517003FC883 /* CutoutTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CutoutTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		00E356ED1AD99517003FC889 /* CutoutNativeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutoutTests/CutoutNativeTests.swift; sourceTree = "<group>"; };
+		00E356ED1AD99517003FC990 /* UnitTests.debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Cutout/UnitTests.debug.xcconfig; sourceTree = "<group>"; };
+		00E356ED1AD99517003FC991 /* UnitTests.release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Cutout/UnitTests.release.xcconfig; sourceTree = "<group>"; };
+		00E356ED1AD99517003FC923 /* CutoutUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CutoutUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		00E356ED1AD99517003FC929 /* CutoutGalleryFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutoutGalleryFlowTests.swift; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* Cutout.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cutout.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Cutout/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Cutout/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = Cutout/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		3B4392A12AC88292D35C810B /* Pods-Cutout.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Cutout.debug.xcconfig"; path = "Target Support Files/Pods-Cutout/Pods-Cutout.debug.xcconfig"; sourceTree = "<group>"; };
-		5709B34CF0A7D63546082F79 /* Pods-Cutout.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Cutout.release.xcconfig"; path = "Target Support Files/Pods-Cutout/Pods-Cutout.release.xcconfig"; sourceTree = "<group>"; };
+		213E0175B5EDD38F7D34013C /* Pods-Cutout.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Cutout.release.xcconfig"; path = "Target Support Files/Pods-Cutout/Pods-Cutout.release.xcconfig"; sourceTree = "<group>"; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = Cutout/AppDelegate.swift; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = Cutout/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		85592CF4ED65023B1E9E269D /* Pods-Cutout.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Cutout.debug.xcconfig"; path = "Target Support Files/Pods-Cutout/Pods-Cutout.debug.xcconfig"; sourceTree = "<group>"; };
 		AA0000000000000000000002 /* EraseNative.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Cutout/EraseNative.swift; sourceTree = "<group>"; };
 		AA0000000000000000000004 /* EraseBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = Cutout/EraseBridge.m; sourceTree = "<group>"; };
 		AA0000000000000000000006 /* isnet.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; name = isnet.onnx; path = ../app/src/main/assets/isnet.onnx; sourceTree = "<group>"; };
@@ -37,6 +78,22 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		00E356ED1AD99517003FC884 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				00E356ED1AD99517003FC881 /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		00E356ED1AD99517003FC924 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				00E356ED1AD99517003FC921 /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		13B07F8C1A680F5B00A75B9A /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -48,10 +105,21 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		00E356ED1AD99517003FC922 /* CutoutUITests */ = {
+			isa = PBXGroup;
+			children = (
+				00E356ED1AD99517003FC929 /* CutoutGalleryFlowTests.swift */,
+			);
+			path = CutoutUITests;
+			sourceTree = "<group>";
+		};
 		13B07FAE1A68108700A75B9A /* Cutout */ = {
 			isa = PBXGroup;
 			children = (
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
+				00E356ED1AD99517003FC889 /* CutoutNativeTests.swift */,
+				00E356ED1AD99517003FC990 /* UnitTests.debug.xcconfig */,
+				00E356ED1AD99517003FC991 /* UnitTests.release.xcconfig */,
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
 				AA0000000000000000000002 /* EraseNative.swift */,
 				AA0000000000000000000004 /* EraseBridge.m */,
@@ -83,6 +151,7 @@
 			isa = PBXGroup;
 			children = (
 				13B07FAE1A68108700A75B9A /* Cutout */,
+				00E356ED1AD99517003FC922 /* CutoutUITests */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
@@ -99,6 +168,8 @@
 			isa = PBXGroup;
 			children = (
 				13B07F961A680F5B00A75B9A /* Cutout.app */,
+				00E356ED1AD99517003FC883 /* CutoutTests.xctest */,
+				00E356ED1AD99517003FC923 /* CutoutUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -106,8 +177,8 @@
 		BBD78D7AC51CEA395F1C20DB /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				3B4392A12AC88292D35C810B /* Pods-Cutout.debug.xcconfig */,
-				5709B34CF0A7D63546082F79 /* Pods-Cutout.release.xcconfig */,
+				85592CF4ED65023B1E9E269D /* Pods-Cutout.debug.xcconfig */,
+				213E0175B5EDD38F7D34013C /* Pods-Cutout.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -115,6 +186,41 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		00E356ED1AD99517003FC87E /* CutoutTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 00E356ED1AD99517003FC886 /* Build configuration list for PBXNativeTarget "CutoutTests" */;
+			buildPhases = (
+				00E356ED1AD99517003FC887 /* Sources */,
+				00E356ED1AD99517003FC884 /* Frameworks */,
+				00E356ED1AD99517003FC885 /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				00E356ED1AD99517003FC88A /* PBXTargetDependency */,
+			);
+			name = CutoutTests;
+			productName = CutoutTests;
+			productReference = 00E356ED1AD99517003FC883 /* CutoutTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		00E356ED1AD99517003FC97E /* CutoutUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 00E356ED1AD99517003FC986 /* Build configuration list for PBXNativeTarget "CutoutUITests" */;
+			buildPhases = (
+				00E356ED1AD99517003FC927 /* Sources */,
+				00E356ED1AD99517003FC924 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				00E356ED1AD99517003FC92A /* PBXTargetDependency */,
+			);
+			name = CutoutUITests;
+			productName = CutoutUITests;
+			productReference = 00E356ED1AD99517003FC923 /* CutoutUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		13B07F861A680F5B00A75B9A /* Cutout */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "Cutout" */;
@@ -145,6 +251,14 @@
 			attributes = {
 				LastUpgradeCheck = 1210;
 				TargetAttributes = {
+					00E356ED1AD99517003FC87E = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = 13B07F861A680F5B00A75B9A;
+					};
+					00E356ED1AD99517003FC97E = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = 13B07F861A680F5B00A75B9A;
+					};
 					13B07F861A680F5B00A75B9A = {
 						LastSwiftMigration = 1120;
 					};
@@ -164,6 +278,8 @@
 			projectRoot = "";
 			targets = (
 				13B07F861A680F5B00A75B9A /* Cutout */,
+				00E356ED1AD99517003FC87E /* CutoutTests */,
+				00E356ED1AD99517003FC97E /* CutoutUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -274,6 +390,22 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		00E356ED1AD99517003FC887 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				00E356ED1AD99517003FC880 /* CutoutNativeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		00E356ED1AD99517003FC927 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				00E356ED1AD99517003FC920 /* CutoutGalleryFlowTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		13B07F871A680F5B00A75B9A /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -286,10 +418,83 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		00E356ED1AD99517003FC88A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 13B07F861A680F5B00A75B9A /* Cutout */;
+			targetProxy = 00E356ED1AD99517003FC888 /* PBXContainerItemProxy */;
+		};
+		00E356ED1AD99517003FC92A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 13B07F861A680F5B00A75B9A /* Cutout */;
+			targetProxy = 00E356ED1AD99517003FC928 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		00E356ED1AD99517003FC890 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 00E356ED1AD99517003FC990 /* UnitTests.debug.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kigya.cutout.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cutout.app/Cutout";
+			};
+			name = Debug;
+		};
+		00E356ED1AD99517003FC891 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 00E356ED1AD99517003FC991 /* UnitTests.release.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kigya.cutout.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Cutout.app/Cutout";
+			};
+			name = Release;
+		};
+		00E356ED1AD99517003FC980 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kigya.cutout.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Cutout;
+			};
+			name = Debug;
+		};
+		00E356ED1AD99517003FC981 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.kigya.cutout.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Cutout;
+			};
+			name = Release;
+		};
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 3B4392A12AC88292D35C810B /* Pods-Cutout.debug.xcconfig */;
+			baseConfigurationReference = 85592CF4ED65023B1E9E269D /* Pods-Cutout.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -301,7 +506,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -320,18 +525,18 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 5709B34CF0A7D63546082F79 /* Pods-Cutout.release.xcconfig */;
+			baseConfigurationReference = 213E0175B5EDD38F7D34013C /* Pods-Cutout.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				INFOPLIST_FILE = Cutout/Info.plist;
+				INFOPLIST_FILE = Cutout/Info.Release.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-ObjC",
@@ -538,6 +743,24 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		00E356ED1AD99517003FC886 /* Build configuration list for PBXNativeTarget "CutoutTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				00E356ED1AD99517003FC890 /* Debug */,
+				00E356ED1AD99517003FC891 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		00E356ED1AD99517003FC986 /* Build configuration list for PBXNativeTarget "CutoutUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				00E356ED1AD99517003FC980 /* Debug */,
+				00E356ED1AD99517003FC981 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "Cutout" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

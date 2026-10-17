@@ -25,16 +25,19 @@ import { useTheme } from '../theme/ThemeProvider';
 import { base64ToBytes, bytesToBase64 } from '../logic/bytes';
 import { windowTier } from '../logic/layout';
 import { savePhase } from '../logic/save';
+import { positiveScaleOrOne } from '../logic/zoom';
 import {
   applyStrokeInPlace,
   canCopyEdited,
+  previousStrokePoint,
   sameAlpha,
   strokePoints,
   viewToBitmap,
   type BrushTool,
   type Point,
+  containRect,
 } from '../logic/stroke';
-import { appendStroke, replayStrokes, type MaskStroke, type StrokeHistory } from '../editor/history';
+import { commitStrokeHistory, redoStrokeHistory, replayStrokes, undoStrokeHistory, type MaskStroke, type StrokeHistory } from '../editor/history';
 import { useEditorGestureController } from '../editor/useEditorGestureController';
 import { Erase } from '../native/Erase';
 import { track } from '../logic/telemetry';
@@ -122,6 +125,7 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
     { scale: scale.value },
   ]);
   const origin = useMemo(() => ({ x: box.width / 2, y: box.height / 2 }), [box.height, box.width]);
+  const imageRect = useMemo(() => containRect(box.width, box.height, width, height), [box.height, box.width, height, width]);
 
   useEffect(() => {
     let alive = true;
@@ -215,9 +219,9 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
     if (!activeStroke.current || !activeAlpha.current) return;
     const current = boxRef.current;
     const next = viewToBitmap(x, y, current.width, current.height, width, height, { scale: userScale, tx, ty });
-    const previous = points.current[points.current.length - 1] ?? next;
+    const previous = previousStrokePoint(points.current, next);
     const fit = Math.min(current.width / width, current.height / height);
-    const userScaleSafe = userScale > 0 ? userScale : 1;
+    const userScaleSafe = positiveScaleOrOne(userScale);
     const bitmapRadius = activeRadius.current / Math.max(fit * userScaleSafe, 0.01);
     const segment = strokePoints(previous, next, Math.max(1, bitmapRadius / 4));
     points.current.push(...segment);
@@ -263,12 +267,12 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
     const fit = Math.min(frameBox.width / width, frameBox.height / height);
     const bitmapRadius = activeRadius.current / Math.max(fit * userScale, 0.01);
     const action = { points: sampled.map(point => ({ ...point })), radius: bitmapRadius, tool: activeTool.current };
-    if (!showMask(next)) return;
     const history = strokeHistory.current;
-    if (!history) return;
-    strokeHistory.current = appendStroke(history, action, width, height);
-    syncHistory();
-    track('editor_action', { action: activeTool.current, surface: 'app' });
+    commitStrokeHistory(history, action, width, height, () => showMask(next), updated => {
+      strokeHistory.current = updated;
+      syncHistory();
+      track('editor_action', { action: activeTool.current, surface: 'app' });
+    });
   }
 
   function replayTo(index: number) {
@@ -281,13 +285,13 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
   function undo() {
     track('editor_action', { action: 'undo', surface: 'app' });
     const history = strokeHistory.current;
-    if (history && history.index > 0) replayTo(history.index - 1);
+    undoStrokeHistory(history, replayTo);
   }
 
   function redo() {
     track('editor_action', { action: 'redo', surface: 'app' });
     const history = strokeHistory.current;
-    if (history && history.index < history.strokes.length) replayTo(history.index + 1);
+    redoStrokeHistory(history, replayTo);
   }
 
   async function exportCurrent(): Promise<string | null> {
@@ -369,12 +373,13 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
           </Group>
           {comparing ? (
             <Group transform={transform} origin={origin}>
-              {original ? <Image image={original} x={0} y={0} width={box.width} height={box.height} fit="contain" /> : null}
+              {original ? <Image image={original} x={imageRect.x} y={imageRect.y} width={imageRect.width} height={imageRect.height} fit="fill" /> : null}
             </Group>
           ) : (
             <Group layer transform={transform} origin={origin}>
-              {original && maskImage ? <Image image={original} x={0} y={0} width={box.width} height={box.height} fit="contain" /> : null}
-              {maskImage ? <Image image={maskImage} x={0} y={0} width={box.width} height={box.height} fit="contain" blendMode="dstIn" /> : null}
+              {/* Both layers share the session frame used by strokes and native export. */}
+              {original && maskImage ? <Image image={original} x={imageRect.x} y={imageRect.y} width={imageRect.width} height={imageRect.height} fit="fill" /> : null}
+              {maskImage ? <Image image={maskImage} x={imageRect.x} y={imageRect.y} width={imageRect.width} height={imageRect.height} fit="fill" blendMode="dstIn" /> : null}
             </Group>
           )}
           <Circle cx={cursorX} cy={cursorY} r={cursorR} color="rgba(255,255,255,0.8)" style="stroke" strokeWidth={2} />
@@ -450,7 +455,7 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
         {canvas}
         {sideTools ? (
           <ScrollView
-            style={{ width: 288, flexShrink: 0 }}
+            style={{ width: 288, flexGrow: 0, flexShrink: 0 }}
             contentContainerStyle={{ gap: 8, paddingLeft: 16, paddingVertical: 4 }}
             showsVerticalScrollIndicator>
             {tools}
