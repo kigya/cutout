@@ -59,9 +59,10 @@ class ClipboardImages @Inject constructor(
         return if (denied) ClipboardLook.Unreadable else ClipboardLook.Empty
     }
 
+    @Synchronized
     fun publish(bytes: ByteArray, extension: String): Uri {
         val directory = File(context.filesDir, "cutouts").apply { mkdirs() }
-        val file = File(directory, "cutout-${System.currentTimeMillis()}.$extension")
+        val file = File(directory, "cutout-${java.util.UUID.randomUUID()}.$extension")
         file.writeBytes(bytes)
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val clipboard = context.getSystemService(ClipboardManager::class.java)

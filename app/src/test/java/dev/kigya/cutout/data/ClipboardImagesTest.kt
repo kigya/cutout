@@ -18,10 +18,15 @@ import dev.kigya.cutout.data.IncomingImage.Svg
 import java.io.File
 import java.io.FileNotFoundException
 import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -33,6 +38,7 @@ import org.robolectric.shadows.ShadowContentResolver
 import org.robolectric.shadows.ShadowSystemClock
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.spyk
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
@@ -87,6 +93,85 @@ class ClipboardImagesTest {
         assertEquals("image/svg+xml", app.contentResolver.getType(second))
         assertTrue(runCatching { app.contentResolver.openInputStream(first) }.isFailure)
         assertArrayEquals(byteArrayOf(2), app.contentResolver.openInputStream(second)!!.use { it.readBytes() })
+    }
+
+    @Test fun `concurrent publish cleanup cannot delete the newer primary clip file`() {
+        val controlledClipboard = mockk<ClipboardManager>()
+        val context = spyk(app)
+        every { context.getSystemService(ClipboardManager::class.java) } returns controlledClipboard
+        val concurrentCalls = AtomicInteger()
+        val maxConcurrentCalls = AtomicInteger()
+        val callbackCount = AtomicInteger()
+        val firstCallbackEntered = CountDownLatch(1)
+        val allowFirstCallbackToReturn = CountDownLatch(1)
+        val currentClip = AtomicReference<ClipData>()
+        every { controlledClipboard.setPrimaryClip(any()) } answers {
+            val active = concurrentCalls.incrementAndGet()
+            maxConcurrentCalls.updateAndGet { previous -> maxOf(previous, active) }
+            try {
+                currentClip.set(firstArg())
+                if (callbackCount.getAndIncrement() == 0) {
+                    firstCallbackEntered.countDown()
+                    check(allowFirstCallbackToReturn.await(5, TimeUnit.SECONDS)) {
+                        "timed out waiting to release first clipboard publication"
+                    }
+                }
+            } finally {
+                concurrentCalls.decrementAndGet()
+            }
+        }
+
+        val publisher = ClipboardImages(context)
+        val failures = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val firstResult = AtomicReference<Uri>()
+        val secondResult = AtomicReference<Uri>()
+        val secondAttempting = CountDownLatch(1)
+        val secondFinished = CountDownLatch(1)
+        val firstThread = Thread({
+            runCatching { publisher.publish(byteArrayOf(1), "png") }
+                .onSuccess(firstResult::set)
+                .onFailure(failures::add)
+        }, "clipboard-publish-first")
+        val secondThread = Thread({
+            secondAttempting.countDown()
+            try {
+                runCatching { publisher.publish(byteArrayOf(2), "svg") }
+                    .onSuccess(secondResult::set)
+                    .onFailure(failures::add)
+            } finally {
+                secondFinished.countDown()
+            }
+        }, "clipboard-publish-second")
+
+        try {
+            firstThread.start()
+            assertTrue("first publication should reach setPrimaryClip", firstCallbackEntered.await(5, TimeUnit.SECONDS))
+            secondThread.start()
+            assertTrue("second publisher should start", secondAttempting.await(5, TimeUnit.SECONDS))
+
+            // With serialized publish(), B must wait while A is between setting the
+            // primary clip and pruning old payload files. On the unsynchronized path,
+            // B finishes and A's later cleanup deletes B's active file.
+            val secondFinishedBeforeFirstReleased = secondFinished.await(300, TimeUnit.MILLISECONDS)
+            allowFirstCallbackToReturn.countDown()
+            firstThread.join(5_000)
+            secondThread.join(5_000)
+
+            assertFalse("publisher threads must finish", firstThread.isAlive || secondThread.isAlive)
+            assertTrue("both publications should succeed: $failures", failures.isEmpty())
+            assertFalse("the second publication must wait for first cleanup", secondFinishedBeforeFirstReleased)
+            assertEquals(1, maxConcurrentCalls.get())
+            assertNotNull(firstResult.get())
+            assertNotNull(secondResult.get())
+
+            val activeUri = currentClip.get().getItemAt(0).uri
+            assertEquals(secondResult.get(), activeUri)
+            assertArrayEquals(byteArrayOf(2), app.contentResolver.openInputStream(activeUri!!)!!.use { it.readBytes() })
+        } finally {
+            allowFirstCallbackToReturn.countDown()
+            firstThread.join(5_000)
+            secondThread.join(5_000)
+        }
     }
 
     @Test fun `returns empty when the clipboard service or primary clip is absent`() {
