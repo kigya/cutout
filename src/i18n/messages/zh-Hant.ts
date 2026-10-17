@@ -26,6 +26,7 @@ export const zhHant: Messages = {
   analyticsConsent: "分享使用資料",
   crashConsent: "分享當機報告",
   privacyPolicy: "隱私權政策",
+  privacyOpenFailed: "無法開啟隱私權政策",
   feedback: "傳送意見",
   localProcessing: '所有處理都在這台裝置上完成。圖片不會傳送到任何地方。',
   cutHere: '在這裡去背',

@@ -26,6 +26,7 @@ export const it: Messages = {
   analyticsConsent: "Condividi dati di utilizzo",
   crashConsent: "Condividi segnalazioni di arresto anomalo",
   privacyPolicy: "Informativa sulla privacy",
+  privacyOpenFailed: "Impossibile aprire l’informativa sulla privacy",
   feedback: "Invia feedback",
   localProcessing: 'Tutto viene elaborato su questo dispositivo. L’immagine non viene inviata da nessuna parte.',
   cutHere: 'Ritaglia qui',

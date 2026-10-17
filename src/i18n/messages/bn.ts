@@ -26,6 +26,7 @@ export const bn: Messages = {
   analyticsConsent: "ব্যবহারের ডেটা শেয়ার করুন",
   crashConsent: "ক্র্যাশ রিপোর্ট শেয়ার করুন",
   privacyPolicy: "গোপনীয়তা নীতি",
+  privacyOpenFailed: "গোপনীয়তা নীতি খোলা যায়নি",
   feedback: "মতামত পাঠান",
   localProcessing: 'সব প্রক্রিয়াকরণ এই ডিভাইসেই হয়। ছবি কোথাও পাঠানো হয় না।',
   cutHere: 'এখানে কাটুন',

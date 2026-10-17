@@ -26,6 +26,7 @@ export const cs: Messages = {
   analyticsConsent: "Sdílet údaje o používání",
   crashConsent: "Sdílet hlášení o pádech",
   privacyPolicy: "Zásady ochrany soukromí",
+  privacyOpenFailed: "Zásady ochrany soukromí se nepodařilo otevřít",
   feedback: "Poslat zpětnou vazbu",
   localProcessing: 'Vše se zpracovává na tomto zařízení. Obrázek se nikam neodesílá.',
   cutHere: 'Vystřihnout tady',

@@ -26,6 +26,7 @@ export const fil: Messages = {
   analyticsConsent: "Magbahagi ng datos ng paggamit",
   crashConsent: "Magbahagi ng mga ulat ng pag-crash",
   privacyPolicy: "Patakaran sa privacy",
+  privacyOpenFailed: "Hindi mabuksan ang patakaran sa privacy",
   feedback: "Magpadala ng feedback",
   localProcessing: 'Ang lahat ng pagproseso ay sa device na ito. Hindi ipinapadala ang larawan kahit saan.',
   cutHere: 'I-cut dito',

@@ -26,6 +26,7 @@ export const he: Messages = {
   analyticsConsent: "שיתוף נתוני שימוש",
   crashConsent: "שיתוף דוחות קריסה",
   privacyPolicy: "מדיניות פרטיות",
+  privacyOpenFailed: "לא ניתן לפתוח את מדיניות הפרטיות",
   feedback: "שליחת משוב",
   localProcessing: 'כל העיבוד נעשה במכשיר הזה. התמונה לא נשלחת לשום מקום.',
   cutHere: 'גזירה כאן',

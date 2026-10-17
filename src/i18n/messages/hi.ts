@@ -26,6 +26,7 @@ export const hi: Messages = {
   analyticsConsent: "उपयोग डेटा साझा करें",
   crashConsent: "क्रैश रिपोर्ट साझा करें",
   privacyPolicy: "गोपनीयता नीति",
+  privacyOpenFailed: "गोपनीयता नीति नहीं खोली जा सकी",
   feedback: "प्रतिक्रिया भेजें",
   localProcessing: 'सारी प्रोसेसिंग इसी डिवाइस पर होती है। तस्वीर कहीं नहीं भेजी जाती।',
   cutHere: 'यहीं काटें',

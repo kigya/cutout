@@ -2,6 +2,7 @@ package dev.kigya.cutout
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -25,6 +26,16 @@ class MainActivity : ReactActivity() {
         installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        applySystemBarAppearance()
+        emitEdit(intent)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applySystemBarAppearance()
+    }
+
+    private fun applySystemBarAppearance() {
         val savedTheme = getSharedPreferences("cutout_preferences", Context.MODE_PRIVATE).getString("theme", "system")
         val systemDark = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
         val light = when (savedTheme) { "light" -> true; "dark" -> false; else -> !systemDark }
@@ -32,7 +43,6 @@ class MainActivity : ReactActivity() {
             isAppearanceLightStatusBars = light
             isAppearanceLightNavigationBars = light
         }
-        emitEdit(intent)
     }
 
     override fun onNewIntent(intent: Intent) {

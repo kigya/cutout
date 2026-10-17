@@ -26,6 +26,7 @@ export const ja: Messages = {
   analyticsConsent: "使用状況データを共有",
   crashConsent: "クラッシュレポートを共有",
   privacyPolicy: "プライバシーポリシー",
+  privacyOpenFailed: "プライバシーポリシーを開けませんでした",
   feedback: "フィードバックを送信",
   localProcessing: '処理はすべてこの端末で行います。画像はどこにも送信されません。',
   cutHere: 'ここで切り抜く',

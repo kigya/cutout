@@ -26,6 +26,7 @@ export const ar: Messages = {
   analyticsConsent: "مشاركة بيانات الاستخدام",
   crashConsent: "مشاركة تقارير الأعطال",
   privacyPolicy: "سياسة الخصوصية",
+  privacyOpenFailed: "تعذّر فتح سياسة الخصوصية",
   feedback: "إرسال ملاحظات",
   localProcessing: 'تتم المعالجة كلها على هذا الجهاز. لا تُرسل الصورة إلى أي مكان.',
   cutHere: 'قص هنا',

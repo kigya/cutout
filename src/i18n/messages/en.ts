@@ -24,6 +24,7 @@ export const en = {
   analyticsConsent: "Share usage data",
   crashConsent: "Share crash reports",
   privacyPolicy: "Privacy policy",
+  privacyOpenFailed: "Could not open the privacy policy",
   feedback: "Send feedback",
 
   localProcessing: 'Everything is processed on this device. The picture is never sent anywhere.',

@@ -17,10 +17,15 @@ import FirebaseRemoteConfig
 @objc(Erase)
 final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, WKNavigationDelegate {
   private var pickerResolve: RCTPromiseResolveBlock?
-  private var pickerReject: RCTPromiseRejectBlock?
+  private var pickerControllers: [ObjectIdentifier: UUID] = [:]
+  private let pickerLock = NSLock()
+  private var pickerRequestID: UUID?
+  private var pickerAwaitingData = false
+  private var pickerLoadTimeout: DispatchWorkItem?
   private var ortEnv: ORTEnv?
   private var ortSession: ORTSession?
-  private var modelQueue = DispatchQueue(label: "dev.kigya.cutout.isnet", qos: .userInitiated)
+  private let modelQueue = DispatchQueue(label: "dev.kigya.cutout.isnet", qos: .userInitiated)
+  private let processingQueue = DispatchQueue(label: "dev.kigya.cutout.processing", qos: .userInitiated)
   private var pendingEdit: [String: Any]?
   private let cutLock = NSLock()
   private var currentCut: UUID?
@@ -115,17 +120,22 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
 
   @objc(pickAndCut:resolver:rejecter:)
   func pickAndCut(_ mode: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    pickerLock.lock()
+    guard pickerRequestID == nil else { pickerLock.unlock(); resolve(["status": "failed", "message": "busy"]); return }
+    let requestID = UUID()
+    pickerRequestID = requestID
     pickerResolve = resolve
-    pickerReject = reject
+    pickerLock.unlock()
+
     DispatchQueue.main.async {
       guard let presenter = self.topViewController() else {
-        self.pickerResolve = nil; self.pickerReject = nil
-        resolve(["status": "failed", "message": "picker_failed"])
+        self.completePicker(["status": "failed", "message": "picker_failed"], requestID: requestID)
         return
       }
       if mode == "file" {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.image, UTType.svg], asCopy: true)
         picker.delegate = self
+        guard self.associatePickerController(picker, requestID: requestID) else { return }
         presenter.present(picker, animated: true)
       } else {
         var config = PHPickerConfiguration(photoLibrary: .shared())
@@ -133,6 +143,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
         config.selectionLimit = 1
         let picker = PHPickerViewController(configuration: config)
         picker.delegate = self
+        guard self.associatePickerController(picker, requestID: requestID) else { return }
         presenter.present(picker, animated: true)
       }
     }
@@ -164,8 +175,20 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
 
   @objc(cancelCut:rejecter:)
   func cancelCut(_ resolve: @escaping RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
-    let token = lockedCurrentCut()
-    setCurrentCut(nil)
+    pickerLock.lock()
+    cutLock.lock()
+    let token = currentCut
+    currentCut = nil
+    let resolvePicker = pickerResolve
+    pickerResolve = nil
+    pickerRequestID = nil
+    pickerAwaitingData = false
+    pickerLoadTimeout?.cancel()
+    pickerLoadTimeout = nil
+    pickerControllers.removeAll()
+    cutLock.unlock()
+    pickerLock.unlock()
+
     DispatchQueue.main.async {
       if let token, let job = self.svgJobs.removeValue(forKey: token) {
         job.0.navigationDelegate = nil
@@ -173,6 +196,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
         job.0.removeFromSuperview()
         job.1(["status": "failed", "message": "cancelled"])
       }
+      resolvePicker?(["status": "failed", "message": "cancelled"])
       resolve(nil)
     }
   }
@@ -366,52 +390,137 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
 
   func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
     picker.dismiss(animated: true)
-    guard let provider = results.first?.itemProvider else { completePicker(["status": "failed", "message": "cancelled"]); return }
+    guard let requestID = takePickerRequest(for: picker) else { return }
+    guard let provider = results.first?.itemProvider else {
+      completePicker(["status": "failed", "message": "cancelled"], requestID: requestID)
+      return
+    }
+
+    // The picker has returned a selection. Show preparation while Photos supplies the bytes.
+    emitProgress(8)
+    armPickerLoadTimeout(requestID)
     provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, error in
+      // Ignore late callbacks after timeout or user cancellation; in particular, never copy a
+      // cutout produced by a request whose promise has already completed.
+      guard self.clearPickerLoadTimeout(requestID) else { return }
       guard let data, error == nil, data.count <= 32 * 1024 * 1024,
-            let image = self.downsampledImage(data) else { self.completePicker(["status": "failed", "message": "read_failed"]); return }
-      self.process(image: image, rasterizedSvg: false, resolve: { self.completePicker($0 ?? NSNull()) }, reject: { _, message, _ in self.completePicker(["status": "failed", "message": message ?? "read_failed"] as [String: Any]) })
+            let image = self.downsampledImage(data) else {
+        self.completePicker(["status": "failed", "message": "read_failed"], requestID: requestID)
+        return
+      }
+      self.process(image: image, rasterizedSvg: false, pickerRequestID: requestID,
+                   resolve: { self.completePicker($0 ?? NSNull(), requestID: requestID) },
+                   reject: { _, message, _ in
+                     self.completePicker(["status": "failed", "message": message ?? "read_failed"] as [String: Any], requestID: requestID)
+                   })
     }
   }
 
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-    completePicker(["status": "failed", "message": "cancelled"])
+    guard let requestID = takePickerRequest(for: controller) else { return }
+    completePicker(["status": "failed", "message": "cancelled"], requestID: requestID)
   }
 
   func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-    guard let url = urls.first else { completePicker(["status": "failed", "message": "read_failed"]); return }
+    guard let requestID = takePickerRequest(for: controller) else { return }
+    guard let url = urls.first else {
+      completePicker(["status": "failed", "message": "read_failed"], requestID: requestID)
+      return
+    }
     let scoped = url.startAccessingSecurityScopedResource()
     defer { if scoped { url.stopAccessingSecurityScopedResource() } }
     do {
       let attributes = try fm.attributesOfItem(atPath: url.path)
       guard ((attributes[.size] as? NSNumber)?.intValue ?? Int.max) <= 32 * 1024 * 1024 else {
-        completePicker(["status": "failed", "message": "read_failed"]); return
+        completePicker(["status": "failed", "message": "read_failed"], requestID: requestID)
+        return
       }
       let data = try Data(contentsOf: url, options: .mappedIfSafe)
       if url.pathExtension.lowercased() == "svg" {
-        guard let text = String(data: data, encoding: .utf8) else { completePicker(["status": "failed", "message": "read_failed"]); return }
-        processSVG(text, resolve: { self.completePicker($0 ?? NSNull()) }, reject: { _, message, _ in self.completePicker(["status": "failed", "message": message ?? "read_failed"] as [String: Any]) })
+        guard let text = String(data: data, encoding: .utf8) else {
+          completePicker(["status": "failed", "message": "read_failed"], requestID: requestID)
+          return
+        }
+        processSVG(text, pickerRequestID: requestID,
+                   resolve: { self.completePicker($0 ?? NSNull(), requestID: requestID) },
+                   reject: { _, message, _ in
+                     self.completePicker(["status": "failed", "message": message ?? "read_failed"] as [String: Any], requestID: requestID)
+                   })
       } else if let image = downsampledImage(data) {
-        process(image: image, rasterizedSvg: false, resolve: { self.completePicker($0 ?? NSNull()) }, reject: { _, message, _ in self.completePicker(["status": "failed", "message": message ?? "read_failed"] as [String: Any]) })
-      } else { completePicker(["status": "failed", "message": "read_failed"]) }
-    } catch { completePicker(["status": "failed", "message": "read_failed"]) }
+        process(image: image, rasterizedSvg: false, pickerRequestID: requestID,
+                resolve: { self.completePicker($0 ?? NSNull(), requestID: requestID) },
+                reject: { _, message, _ in
+                  self.completePicker(["status": "failed", "message": message ?? "read_failed"] as [String: Any], requestID: requestID)
+                })
+      } else {
+        completePicker(["status": "failed", "message": "read_failed"], requestID: requestID)
+      }
+    } catch {
+      completePicker(["status": "failed", "message": "read_failed"], requestID: requestID)
+    }
   }
 
-  private func completePicker(_ value: Any) {
+  private func associatePickerController(_ controller: UIViewController, requestID: UUID) -> Bool {
+    pickerLock.lock(); defer { pickerLock.unlock() }
+    guard pickerRequestID == requestID else { return false }
+    pickerControllers[ObjectIdentifier(controller)] = requestID
+    return true
+  }
+
+  private func takePickerRequest(for controller: UIViewController) -> UUID? {
+    pickerLock.lock(); defer { pickerLock.unlock() }
+    return pickerControllers.removeValue(forKey: ObjectIdentifier(controller))
+  }
+
+  private func armPickerLoadTimeout(_ requestID: UUID) {
+    let timeout = DispatchWorkItem { [weak self] in
+      self?.completePicker(["status": "failed", "message": "read_failed"], requestID: requestID, onlyIfAwaitingData: true)
+    }
+    pickerLock.lock()
+    guard pickerRequestID == requestID else { pickerLock.unlock(); return }
+    pickerLoadTimeout?.cancel()
+    pickerAwaitingData = true
+    pickerLoadTimeout = timeout
+    pickerLock.unlock()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 45, execute: timeout)
+  }
+
+  private func clearPickerLoadTimeout(_ requestID: UUID) -> Bool {
+    pickerLock.lock(); defer { pickerLock.unlock() }
+    guard pickerRequestID == requestID, pickerAwaitingData else { return false }
+    pickerAwaitingData = false
+    pickerLoadTimeout?.cancel()
+    pickerLoadTimeout = nil
+    return true
+  }
+
+  private func completePicker(_ value: Any, requestID: UUID, onlyIfAwaitingData: Bool = false) {
+    pickerLock.lock()
+    guard pickerRequestID == requestID, !onlyIfAwaitingData || pickerAwaitingData else { pickerLock.unlock(); return }
     let resolve = pickerResolve
-    pickerResolve = nil; pickerReject = nil
+    pickerAwaitingData = false
+    pickerRequestID = nil
+    pickerLoadTimeout?.cancel()
+    pickerLoadTimeout = nil
+    pickerResolve = nil
+    pickerLock.unlock()
     DispatchQueue.main.async { resolve?(value) }
   }
 
   // MARK: Processing
 
   private func process(image: UIImage, rasterizedSvg: Bool, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-    process(image: image, rasterizedSvg: rasterizedSvg, token: UUID(), resolve: resolve, reject: reject)
+    process(image: image, rasterizedSvg: rasterizedSvg, pickerRequestID: nil, resolve: resolve, reject: reject)
+  }
+
+  private func process(image: UIImage, rasterizedSvg: Bool, pickerRequestID requestID: UUID?, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+    let token = UUID()
+    guard beginProcessing(token: token, pickerRequestID: requestID) else { return }
+    process(image: image, rasterizedSvg: rasterizedSvg, token: token, resolve: resolve, reject: reject)
   }
 
   private func process(image: UIImage, rasterizedSvg: Bool, token: UUID, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
-    setCurrentCut(token)
-    DispatchQueue.global(qos: .userInitiated).async {
+    processingQueue.async {
       do {
         guard self.isCurrentCut(token) else { throw NSError(domain: "Erase", code: 3, userInfo: [NSLocalizedDescriptionKey: "cancelled"]) }
         self.emitProgress(8)
@@ -420,7 +529,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
         let sourceURL = try self.writeFile(sourcePNG, name: "source")
         self.emitPreview(sourceURL.path)
         guard self.isCurrentCut(token) else { throw NSError(domain: "Erase", code: 3, userInfo: [NSLocalizedDescriptionKey: "cancelled"]) }
-        try self.prepareModelIfNeeded()
+        try self.modelQueue.sync { try self.prepareModelIfNeeded() }
         self.emitProgress(28)
         guard let full = self.segment(normalized), let fullPNG = full.pngData() else {
           guard self.isCurrentCut(token) else { throw NSError(domain: "Erase", code: 3, userInfo: [NSLocalizedDescriptionKey: "cancelled"]) }
@@ -442,8 +551,10 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
         response["previewPath"] = resultURL.path
         let clipboardData = tight.pngData() ?? fullPNG
         DispatchQueue.main.async {
-          guard self.isCurrentCut(token) else { resolve(["status": "failed", "message": "cancelled"]); return }
-          UIPasteboard.general.setData(clipboardData, forPasteboardType: UTType.png.identifier)
+          let published = self.withCurrentCut(token) {
+            UIPasteboard.general.setData(clipboardData, forPasteboardType: UTType.png.identifier)
+          }
+          guard published != nil else { resolve(["status": "failed", "message": "cancelled"]); return }
           self.emitProgress(100)
           resolve(response)
         }
@@ -453,20 +564,27 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     }
   }
 
-  private func processSVG(_ text: String, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+  private func processSVG(_ text: String, pickerRequestID requestID: UUID? = nil, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
     guard let data = text.data(using: .utf8), text.lowercased().contains("<svg") else {
       resolve(["status": "failed", "message": "read_failed"]); return
     }
     guard data.count <= 32 * 1024 * 1024 else { resolve(["status": "failed", "message": "read_failed"]); return }
+    let token = UUID()
+    guard beginProcessing(token: token, pickerRequestID: requestID) else { return }
     if let stripped = stripSolidBackdrop(text) {
-      UIPasteboard.general.setData(Data(stripped.utf8), forPasteboardType: UTType.svg.identifier)
+      let published = withCurrentCut(token) {
+        UIPasteboard.general.setData(Data(stripped.utf8), forPasteboardType: UTType.svg.identifier)
+      }
+      guard published != nil else { resolve(["status": "failed", "message": "cancelled"]); return }
       resolve(["status": "svg", "message": "copied"]); return
     }
-    let token = UUID()
-    setCurrentCut(token)
     emitProgress(8)
     // Render only the embedded SVG data. JavaScript and all external loads are disabled.
     DispatchQueue.main.async {
+      guard self.isCurrentCut(token) else {
+        resolve(["status": "failed", "message": "cancelled"])
+        return
+      }
       let config = WKWebViewConfiguration()
       config.websiteDataStore = .nonPersistent()
       config.defaultWebpagePreferences.allowsContentJavaScript = false
@@ -669,6 +787,23 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
 
   private func setCurrentCut(_ token: UUID?) {
     cutLock.lock(); currentCut = token; cutLock.unlock()
+  }
+
+  private func beginProcessing(token: UUID, pickerRequestID requestID: UUID?) -> Bool {
+    guard let requestID else { setCurrentCut(token); return true }
+    pickerLock.lock()
+    guard pickerRequestID == requestID else { pickerLock.unlock(); return false }
+    cutLock.lock()
+    currentCut = token
+    cutLock.unlock()
+    pickerLock.unlock()
+    return true
+  }
+
+  private func withCurrentCut<T>(_ token: UUID, _ action: () throws -> T) rethrows -> T? {
+    cutLock.lock(); defer { cutLock.unlock() }
+    guard currentCut == token else { return nil }
+    return try action()
   }
 
   private func lockedCurrentCut() -> UUID? {

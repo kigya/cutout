@@ -26,6 +26,7 @@ export const fa: Messages = {
   analyticsConsent: "اشتراک‌گذاری داده‌های استفاده",
   crashConsent: "اشتراک‌گذاری گزارش‌های خرابی",
   privacyPolicy: "سیاست حریم خصوصی",
+  privacyOpenFailed: "سیاست حفظ حریم خصوصی باز نشد",
   feedback: "ارسال بازخورد",
   localProcessing: 'همهٔ پردازش روی همین دستگاه انجام می‌شود. تصویر به جایی فرستاده نمی‌شود.',
   cutHere: 'اینجا برش بزن',

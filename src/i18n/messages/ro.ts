@@ -26,6 +26,7 @@ export const ro: Messages = {
   analyticsConsent: "Partajează datele de utilizare",
   crashConsent: "Partajează rapoarte de blocare",
   privacyPolicy: "Politica de confidențialitate",
+  privacyOpenFailed: "Politica de confidențialitate nu a putut fi deschisă",
   feedback: "Trimite feedback",
   localProcessing: 'Totul se prelucrează pe acest dispozitiv. Imaginea nu este trimisă nicăieri.',
   cutHere: 'Decupează aici',

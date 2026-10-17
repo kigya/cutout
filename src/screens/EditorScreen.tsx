@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import { useDerivedValue, useSharedValue } from 'react-native-reanimated';
 import {
@@ -77,6 +77,8 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
   const checker = useMemo(() => Skia.RuntimeEffect.Make(CHECKER), []);
   const window = useWindowDimensions();
   const wide = windowTier(window.width) === 'expanded';
+  const sideTools = wide && window.width > window.height;
+  const stackedTools = wide || window.fontScale >= 1.2;
   const [tool, setTool] = useState<BrushTool>('erase');
   const [radius, setRadius] = useState(36);
   const [message, setMessage] = useState(note ?? '');
@@ -381,24 +383,44 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
     </View>
   );
 
+  const compareButton = (
+    <Pressable accessibilityRole="button" accessibilityLabel={t('compare')} className="min-h-12 flex-1 items-center justify-center rounded-2xl border px-3 py-3" style={{ minHeight: 48, backgroundColor: colors.surface, borderColor: colors.border }} onPressIn={() => setComparing(true)} onPressOut={() => setComparing(false)}>
+      <Text className="font-semibold" style={{ color: colors.text, textAlign: 'center', flexShrink: 1 }}>{t('compare')}</Text>
+    </Pressable>
+  );
+  const fitButton = (
+    <Pressable accessibilityRole="button" accessibilityLabel={t('zoomFit')} className="min-h-12 flex-1 items-center justify-center rounded-2xl border px-3 py-3" style={{ minHeight: 48, backgroundColor: colors.surface, borderColor: colors.border }} onPress={() => { scale.value = 1; panX.value = 0; panY.value = 0; track('editor_action', { action: 'fit', surface: 'app' }); }}>
+      <Text className="font-semibold" style={{ color: colors.text, textAlign: 'center', flexShrink: 1 }}>{t('zoomFit')}</Text>
+    </Pressable>
+  );
+
   const tools = (
-    <View className={wide ? 'w-56 justify-end gap-2 ps-4' : 'gap-2 pt-4'}>
-      <View className="flex-row gap-2">
-        <View className="flex-1"><Button label={t('erase')} tone={tool === 'erase' ? 'primary' : 'ghost'} onPress={() => setTool('erase')} /></View>
-        <View className="flex-1"><Button label={t('restore')} tone={tool === 'restore' ? 'primary' : 'ghost'} onPress={() => setTool('restore')} /></View>
-      </View>
-      <View className="flex-row gap-2">
-        <View className="flex-1"><Button label={t('undo')} tone="ghost" onPress={undo} disabled={!historyState.undo} /></View>
-        <View className="flex-1"><Button label={t('redo')} tone="ghost" onPress={redo} disabled={!historyState.redo} /></View>
-      </View>
-      <View className="flex-row gap-2">
-        <Pressable accessibilityRole="button" accessibilityLabel={t('compare')} className="h-12 flex-1 items-center justify-center rounded-2xl border" style={{ backgroundColor: colors.surface, borderColor: colors.border }} onPressIn={() => setComparing(true)} onPressOut={() => setComparing(false)}>
-          <Text className="font-semibold" style={{ color: colors.text }}>{t('compare')}</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={t('zoomFit')} className="h-12 items-center justify-center rounded-2xl border px-3" style={{ backgroundColor: colors.surface, borderColor: colors.border }} onPress={() => { scale.value = 1; panX.value = 0; panY.value = 0; track('editor_action', { action: 'fit', surface: 'app' }); }}>
-          <Text className="font-semibold" style={{ color: colors.text }}>{t('zoomFit')}</Text>
-        </Pressable>
-      </View>
+    <View className={sideTools ? 'gap-2' : stackedTools ? 'gap-2 pt-3' : 'gap-2 pt-4'}>
+      {stackedTools ? (
+        <>
+          <Button label={t('erase')} tone={tool === 'erase' ? 'primary' : 'ghost'} onPress={() => setTool('erase')} />
+          <Button label={t('restore')} tone={tool === 'restore' ? 'primary' : 'ghost'} onPress={() => setTool('restore')} />
+          <Button label={t('undo')} tone="ghost" onPress={undo} disabled={!historyState.undo} />
+          <Button label={t('redo')} tone="ghost" onPress={redo} disabled={!historyState.redo} />
+          {compareButton}
+          {fitButton}
+        </>
+      ) : (
+        <>
+          <View className="flex-row gap-2">
+            <View className="flex-1"><Button label={t('erase')} tone={tool === 'erase' ? 'primary' : 'ghost'} onPress={() => setTool('erase')} /></View>
+            <View className="flex-1"><Button label={t('restore')} tone={tool === 'restore' ? 'primary' : 'ghost'} onPress={() => setTool('restore')} /></View>
+          </View>
+          <View className="flex-row gap-2">
+            <View className="flex-1"><Button label={t('undo')} tone="ghost" onPress={undo} disabled={!historyState.undo} /></View>
+            <View className="flex-1"><Button label={t('redo')} tone="ghost" onPress={redo} disabled={!historyState.redo} /></View>
+          </View>
+          <View className="flex-row gap-2">
+            {compareButton}
+            {fitButton}
+          </View>
+        </>
+      )}
       <View className="flex-row justify-center gap-2">
         {SIZES.map(size => (
           <Pressable key={size} accessibilityRole="button" accessibilityLabel={`${t('erase')} ${size}`} className="h-12 w-12 items-center justify-center rounded-full" style={{ backgroundColor: colors.surface }} onPress={() => { setRadius(size); cursorR.value = size; }}>
@@ -410,7 +432,7 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
   );
 
   return (
-    <Screen>
+    <Screen fullWidth={wide}>
       <View className="flex-row items-center justify-between">
         <BackButton onPress={onBack} />
         <View className="flex-row gap-4">
@@ -424,9 +446,16 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
       </View>
       <Text className="pb-3 text-sm" style={{ color: colors.textMuted }}>{ready ? t('editHint') : t('opening')}</Text>
       <Notice message={message} />
-      <View className={wide ? 'min-h-0 flex-1 flex-row' : 'min-h-0 flex-1'}>
+      <View className={sideTools ? 'min-h-0 flex-1 flex-row' : 'min-h-0 flex-1'}>
         {canvas}
-        {tools}
+        {sideTools ? (
+          <ScrollView
+            style={{ width: 288, flexShrink: 0 }}
+            contentContainerStyle={{ gap: 8, paddingLeft: 16, paddingVertical: 4 }}
+            showsVerticalScrollIndicator>
+            {tools}
+          </ScrollView>
+        ) : tools}
       </View>
       <View className="h-2" />
     </Screen>

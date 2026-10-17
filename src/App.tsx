@@ -4,7 +4,6 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './theme/ThemeProvider';
-import { Sheet } from './components/ui/sheet';
 import { DEFAULT_PREFERENCES, readPreferences, track, writePreferences } from './logic/telemetry';
 import type { AppPreferences } from './native/Erase';
 import { LocaleGate, useLocale } from './i18n/LocaleGate';
@@ -31,6 +30,7 @@ type Route =
   | { name: 'editor'; session: EditSession };
 
 const EMPTY: HomeSnapshot = { rows: [], bubbleEnabled: false, showXiaomiTip: false, clipboardReady: false };
+const PRIVACY_POLICY_URL = 'https://raw.githubusercontent.com/kigya/cutout/92f8bbd300061e94c4fd193644d718eebebb2a94/PRIVACY.md';
 
 export default function App() {
   const [preferences, setPreferences] = useState<AppPreferences>(DEFAULT_PREFERENCES);
@@ -55,7 +55,6 @@ export default function App() {
 function Root({ preferences, onPreferences }: { preferences: AppPreferences; onPreferences: (value: AppPreferences) => Promise<void> }) {
   const { locale, t } = useLocale();
   const { colors } = useTheme();
-  const [privacyOpen, setPrivacyOpen] = useState(false);
   const [booting, setBooting] = useState(true);
   const finishBoot = useCallback(() => setBooting(false), []);
   const [route, setRoute] = useState<Route>({ name: 'home' });
@@ -204,7 +203,7 @@ function Root({ preferences, onPreferences }: { preferences: AppPreferences; onP
           crashEnabled={preferences.crashes}
           onAnalyticsChange={analytics => { void onPreferences({ ...preferences, analytics }).catch(() => setNotice(t('saveFailed'))); }}
           onCrashChange={crashes => { void onPreferences({ ...preferences, crashes }).catch(() => setNotice(t('saveFailed'))); }}
-          onOpenPrivacy={() => setPrivacyOpen(true)}
+          onOpenPrivacy={() => { void Linking.openURL(PRIVACY_POLICY_URL).catch(() => setNotice(t('privacyOpenFailed'))); }}
           onFeedback={() => { void Linking.openURL('mailto:kirillborichevskiy@gmail.com?subject=Cutout%20feedback').catch(() => setNotice(t('feedbackFailed'))); }}
           onBack={() => setRoute({ name: 'home' })}
           onLanguage={() => setRoute({ name: 'language' })}
@@ -232,7 +231,6 @@ function Root({ preferences, onPreferences }: { preferences: AppPreferences; onP
         />
       ) : null}
       </Animated.View>
-      <Sheet title={t('privacyPolicy')} body={t('privacyBody')} visible={privacyOpen} closeLabel={t('gotIt')} onClose={() => setPrivacyOpen(false)} />
     </View>
   );
 }

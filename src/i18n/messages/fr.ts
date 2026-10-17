@@ -26,6 +26,7 @@ export const fr: Messages = {
   analyticsConsent: "Partager les données d’utilisation",
   crashConsent: "Partager les rapports d’erreur",
   privacyPolicy: "Politique de confidentialité",
+  privacyOpenFailed: "Impossible d’ouvrir la politique de confidentialité",
   feedback: "Envoyer un commentaire",
   localProcessing: 'Tout est traité sur cet appareil. L’image n’est envoyée nulle part.',
   cutHere: 'Détourer ici',

@@ -26,6 +26,7 @@ export const pl: Messages = {
   analyticsConsent: "Udostępniaj dane o użytkowaniu",
   crashConsent: "Udostępniaj raporty o awariach",
   privacyPolicy: "Polityka prywatności",
+  privacyOpenFailed: "Nie udało się otworzyć polityki prywatności",
   feedback: "Wyślij opinię",
   localProcessing: 'Całe przetwarzanie odbywa się na tym urządzeniu. Obraz nigdzie nie jest wysyłany.',
   cutHere: 'Wytnij tutaj',

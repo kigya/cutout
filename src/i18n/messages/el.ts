@@ -26,6 +26,7 @@ export const el: Messages = {
   analyticsConsent: "Κοινοποίηση δεδομένων χρήσης",
   crashConsent: "Κοινοποίηση αναφορών σφαλμάτων",
   privacyPolicy: "Πολιτική απορρήτου",
+  privacyOpenFailed: "Δεν ήταν δυνατό το άνοιγμα της πολιτικής απορρήτου",
   feedback: "Αποστολή σχολίων",
   localProcessing: 'Όλη η επεξεργασία γίνεται σε αυτή τη συσκευή. Η εικόνα δεν στέλνεται πουθενά.',
   cutHere: 'Αποκοπή εδώ',

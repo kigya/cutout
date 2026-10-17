@@ -26,6 +26,7 @@ export const id: Messages = {
   analyticsConsent: "Bagikan data penggunaan",
   crashConsent: "Bagikan laporan kerusakan",
   privacyPolicy: "Kebijakan privasi",
+  privacyOpenFailed: "Kebijakan privasi tidak dapat dibuka",
   feedback: "Kirim masukan",
   localProcessing: 'Semua pemrosesan terjadi di perangkat ini. Gambar tidak dikirim ke mana pun.',
   cutHere: 'Potong di sini',

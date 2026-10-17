@@ -26,6 +26,7 @@ export const nl: Messages = {
   analyticsConsent: "Gebruiksgegevens delen",
   crashConsent: "Crashrapporten delen",
   privacyPolicy: "Privacybeleid",
+  privacyOpenFailed: "Het privacybeleid kon niet worden geopend",
   feedback: "Feedback sturen",
   localProcessing: 'Alles wordt op dit apparaat verwerkt. De afbeelding wordt nergens heen gestuurd.',
   cutHere: 'Hier uitsnijden',

@@ -26,6 +26,7 @@ export const uk: Messages = {
   analyticsConsent: "Ділитися даними про використання",
   crashConsent: "Ділитися звітами про збої",
   privacyPolicy: "Політика приватності",
+  privacyOpenFailed: "Не вдалося відкрити політику конфіденційності",
   feedback: "Надіслати відгук",
   localProcessing: 'Уся обробка відбувається на пристрої. Зображення нікуди не надсилається.',
   cutHere: 'Вирізати тут',

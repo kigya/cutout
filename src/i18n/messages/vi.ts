@@ -26,6 +26,7 @@ export const vi: Messages = {
   analyticsConsent: "Chia sẻ dữ liệu sử dụng",
   crashConsent: "Chia sẻ báo cáo sự cố",
   privacyPolicy: "Chính sách quyền riêng tư",
+  privacyOpenFailed: "Không thể mở chính sách quyền riêng tư",
   feedback: "Gửi phản hồi",
   localProcessing: 'Mọi xử lý diễn ra trên thiết bị này. Ảnh không được gửi đi đâu cả.',
   cutHere: 'Cắt tại đây',

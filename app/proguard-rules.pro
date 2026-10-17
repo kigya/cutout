@@ -5,7 +5,7 @@
 -dontwarn ai.onnxruntime.**
 -dontwarn com.caverock.androidsvg.**
 
--keep class app.erase.background.bridge.** { *; }
+-keep class dev.kigya.cutout.bridge.** { *; }
 -keepclassmembers class * {
     @com.facebook.react.bridge.ReactMethod *;
 }

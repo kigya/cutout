@@ -26,6 +26,7 @@ export const tr: Messages = {
   analyticsConsent: "Kullanım verilerini paylaş",
   crashConsent: "Kilitlenme raporlarını paylaş",
   privacyPolicy: "Gizlilik politikası",
+  privacyOpenFailed: "Gizlilik politikası açılamadı",
   feedback: "Geri bildirim gönder",
   localProcessing: 'Tüm işlem bu cihazda yapılır. Görüntü hiçbir yere gönderilmez.',
   cutHere: 'Burada kes',

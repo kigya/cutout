@@ -26,6 +26,7 @@ export const ur: Messages = {
   analyticsConsent: "استعمال کا ڈیٹا شیئر کریں",
   crashConsent: "کریش رپورٹس شیئر کریں",
   privacyPolicy: "رازداری کی پالیسی",
+  privacyOpenFailed: "رازداری کی پالیسی نہیں کھل سکی",
   feedback: "رائے بھیجیں",
   localProcessing: 'ساری کارروائی اسی آلے پر ہوتی ہے۔ تصویر کہیں نہیں بھیجی جاتی۔',
   cutHere: 'یہیں کاٹیں',

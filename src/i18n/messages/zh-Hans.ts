@@ -26,6 +26,7 @@ export const zhHans: Messages = {
   analyticsConsent: "分享使用数据",
   crashConsent: "分享崩溃报告",
   privacyPolicy: "隐私政策",
+  privacyOpenFailed: "无法打开隐私政策",
   feedback: "发送反馈",
   localProcessing: '所有处理都在这台设备上完成。图片不会发送到任何地方。',
   cutHere: '在这里抠图',

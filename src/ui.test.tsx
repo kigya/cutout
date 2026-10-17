@@ -1,8 +1,9 @@
 import { act, render, screen, userEvent } from '@testing-library/react-native';
-import { AppState, BackHandler, DeviceEventEmitter, Dimensions, I18nManager, Linking, PermissionsAndroid, Platform, Text } from 'react-native';
+import { AccessibilityInfo, AppState, BackHandler, DeviceEventEmitter, Dimensions, I18nManager, Linking, PermissionsAndroid, Platform, Text } from 'react-native';
 import { base64ToBytes, bytesToBase64 } from './logic/bytes';
 import App from './App';
 import { BubbleApp } from './bubble/BubbleApp';
+import { BubbleDemo } from './components/BubbleDemo';
 import { SplashScreen } from './components/SplashScreen';
 import { SweepPreview } from './components/SweepPreview';
 import { LocaleGate, useLocale } from './i18n/LocaleGate';
@@ -18,6 +19,7 @@ import { LanguageScreen } from './screens/LanguageScreen';
 import { ProcessingScreen } from './screens/ProcessingScreen';
 import { ResultScreen } from './screens/ResultScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { ThemeProvider } from './theme/ThemeProvider';
 
 declare const global: {
   __erase: Record<string, jest.Mock>;
@@ -86,12 +88,14 @@ function readySession(status: 'ready' | 'manual' | 'svg' | 'failed' = 'ready') {
 
 afterEach(() => {
   jest.useRealTimers();
+  jest.restoreAllMocks();
 });
 
 beforeEach(() => {
   jest.clearAllMocks();
   AppState.currentState = 'active';
   AppState.addEventListener = jest.fn(() => ({ remove: jest.fn() }));
+  AccessibilityInfo.isReduceMotionEnabled = jest.fn(async () => false);
   gestures.length = 0;
   compositions.length = 0;
   shared.length = 0;
@@ -144,6 +148,58 @@ test('small controls cover every tone and an empty notice', async () => {
   expect(screen.getByText('plain')).toBeTruthy();
 });
 
+test('theme context can omit a status bar for embedded surfaces', async () => {
+  await render(<ThemeProvider statusBar={false}><Text>Embedded panel</Text></ThemeProvider>);
+  expect(screen.getByText('Embedded panel')).toBeTruthy();
+});
+
+test('reduced motion settles splash, notice, and sheet transitions', async () => {
+  const listeners = jest.spyOn(AccessibilityInfo, 'addEventListener');
+  const splash = await render(<SplashScreen onDone={() => undefined} />);
+  await flush();
+  const splashValues = shared.slice(-2);
+  const splashMotion = listeners.mock.calls.at(-1)![1] as (value: boolean) => void;
+  await act(async () => { splashMotion(true); });
+  expect(splashValues.map(value => value.value)).toEqual([1, 1]);
+  await splash.unmount();
+
+  const notice = await render(<Notice message="Settings saved" />);
+  const noticeMotion = listeners.mock.calls.at(-1)![1] as (value: boolean) => void;
+  await act(async () => { noticeMotion(true); });
+  expect(screen.getByRole('alert')).toBeTruthy();
+  await notice.unmount();
+
+  const sheet = await render(<Sheet title="Details" body="A clear explanation" visible closeLabel="OK" onClose={() => undefined} />);
+  const sheetMotion = listeners.mock.calls.at(-1)![1] as (value: boolean) => void;
+  await act(async () => { sheetMotion(true); });
+  expect(screen.getByText('A clear explanation')).toBeTruthy();
+  await sheet.unmount();
+}, 15000);
+
+test('animated surfaces ignore a system motion preference that resolves after unmount', async () => {
+  const resolvers: Array<(value: boolean) => void> = [];
+  const preference = jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockImplementation(
+    () => new Promise(resolve => { resolvers.push(resolve); }),
+  );
+  const view = await render(
+    <LocaleGate>
+      <BubbleApp />
+      <BubbleDemo onDismiss={() => undefined} />
+      <SweepPreview path="/late-motion.png" width={220} height={112} />
+      <SplashScreen onDone={() => undefined} />
+      <Notice message="Saved" />
+      <Sheet title="Details" body="Body" visible closeLabel="OK" onClose={() => undefined} />
+    </LocaleGate>,
+  );
+  expect(resolvers).toHaveLength(6);
+  await view.unmount();
+  await act(async () => {
+    resolvers.forEach(resolve => resolve(true));
+    await Promise.resolve();
+  });
+  preference.mockRestore();
+});
+
 test('the sheet rises when it is open and stays put when it is closed', async () => {
   const onClose = jest.fn();
   const closed = await render(
@@ -190,6 +246,53 @@ test('the sweep uses a fixed frame, the window frame, and skips a blank image', 
   await render(<SweepPreview path={null} />);
 });
 
+test('the sweep follows app activity and keeps running over the system bubble', async () => {
+  const appStateListener = jest.spyOn(AppState, 'addEventListener');
+  const motionListener = jest.spyOn(AccessibilityInfo, 'addEventListener');
+  await render(<SweepPreview path="/lifecycle.jpg" width={220} height={112} />);
+  await flush();
+  expect(screen.getByTestId('canvas')).toBeTruthy();
+  const clock = shared.at(-1)!;
+  const appStateChange = appStateListener.mock.calls.at(-1)![1] as (state: string) => void;
+  const reducedMotionChange = motionListener.mock.calls.at(-1)![1] as (value: boolean) => void;
+
+  await act(async () => { appStateChange('background'); });
+  expect(clock.value).toBe(0);
+  await act(async () => { appStateChange('active'); });
+  expect(clock.value).toBe(1);
+  await act(async () => { reducedMotionChange(true); });
+  expect(clock.value).toBe(0);
+  await screen.unmount();
+
+  AppState.currentState = 'background';
+  await render(<SweepPreview path="/overlay.jpg" width={220} height={112} overlayVisible />);
+  await flush();
+  expect(shared.at(-1)?.value).toBe(1);
+  AppState.currentState = 'active';
+});
+
+test('bubble demo responds to lifecycle, reduced motion, and dismissal', async () => {
+  const originalState = AppState.currentState;
+  AppState.currentState = 'background';
+  const appStateListener = jest.spyOn(AppState, 'addEventListener');
+  const motionListener = jest.spyOn(AccessibilityInfo, 'addEventListener');
+  const onDismiss = jest.fn();
+  await render(<LocaleGate><BubbleDemo onDismiss={onDismiss} /></LocaleGate>);
+  await flush();
+  const drift = shared.at(-1)!;
+  const appStateChange = appStateListener.mock.calls.at(-1)![1] as (state: string) => void;
+  const reducedMotionChange = motionListener.mock.calls.at(-1)![1] as (value: boolean) => void;
+  expect(drift.value).toBe(0);
+  await act(async () => { appStateChange('active'); });
+  expect(drift.value).toBe(1);
+  await act(async () => { reducedMotionChange(true); });
+  expect(drift.value).toBe(0);
+  await userEvent.press(screen.getByRole('button', { name: 'OK' }));
+  expect(onDismiss).toHaveBeenCalledTimes(1);
+  await screen.unmount();
+  AppState.currentState = originalState;
+});
+
 test('splash finishes once and cancels when it unmounts', async () => {
   jest.useFakeTimers();
   const done = jest.fn();
@@ -218,6 +321,8 @@ test('home disables clipboard until a picture is there and explains each permiss
   await userEvent.press(screen.getByRole('button', { name: 'Settings' }));
   expect(onSettings).toHaveBeenCalled();
   await userEvent.press(screen.getByRole('button', { name: 'Cut here' }));
+  await userEvent.press(screen.getByText('Choose a picture'));
+  expect(screen.getByRole('button', { name: 'Gallery' })).toBeTruthy();
   await userEvent.press(screen.getByRole('button', { name: 'Choose a picture' }));
   await userEvent.press(screen.getByRole('button', { name: 'Cut here' }));
   expect(screen.getByRole('button', { name: 'Clipboard' })).toBeDisabled();
@@ -230,7 +335,7 @@ test('home disables clipboard until a picture is there and explains each permiss
   await userEvent.press(screen.getByRole('button', { name: 'Why this is needed: Windows from the background' }));
   expect(screen.getByText(/gallery may not open/)).toBeTruthy();
   await userEvent.press(screen.getByRole('button', { name: 'OK' }));
-});
+}, 15000);
 
 test('home omits the permissions section when the native snapshot has no permission rows', async () => {
   await render(
@@ -240,6 +345,25 @@ test('home omits the permissions section when the native snapshot has no permiss
   );
   expect(screen.getByText('Cutout')).toBeTruthy();
   expect(screen.queryByText('Permissions')).toBeNull();
+});
+
+test('returning to Home refreshes permissions when bubble setup is not pending', async () => {
+  let stateHandler: ((state: string) => void | Promise<void>) | undefined;
+  const subscription = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+    stateHandler = listener as (state: string) => void | Promise<void>;
+    return { remove: () => undefined };
+  });
+  const onRefresh = jest.fn();
+  await render(
+    <LocaleGate>
+      <HomeScreen home={home} busy={false} notice="" onRefresh={onRefresh} onSettings={() => undefined} onCut={() => undefined} />
+    </LocaleGate>,
+  );
+  onRefresh.mockClear();
+  await act(async () => { await stateHandler?.('active'); });
+  expect(onRefresh).toHaveBeenCalledTimes(1);
+  expect(erase.getHome).not.toHaveBeenCalled();
+  subscription.mockRestore();
 });
 
 test('home hides bubble controls off Android and blocks source selection while busy', async () => {
@@ -264,7 +388,18 @@ test('home hides bubble controls off Android and blocks source selection while b
   await userEvent.press(screen.getByRole('button', { name: 'Cut here' }));
   await userEvent.press(screen.getByRole('button', { name: 'Gallery' }));
   expect(onCut).toHaveBeenCalledWith('gallery');
-});
+  const os = jest.replaceProperty(Platform, 'OS', 'android');
+  const android = await render(
+    <LocaleGate>
+      <HomeScreen home={home} busy={false} notice="" onRefresh={() => undefined} onSettings={() => undefined} onCut={() => undefined} />
+    </LocaleGate>,
+  );
+  expect(screen.getByText(/cut inside the app without the bubble/i)).toBeTruthy();
+  await userEvent.press(screen.getByRole('button', { name: 'OK' }));
+  expect(screen.queryByText(/cut inside the app without the bubble/i)).toBeNull();
+  await android.unmount();
+  os.restore();
+}, 15000);
 
 async function setBubble(value: boolean) {
   const control = screen.getByLabelText('Show bubble');
@@ -351,6 +486,9 @@ test('overlay setup reports failures and rechecks permission when the app return
   );
   erase.openPermission.mockRejectedValueOnce(new Error('settings could not open'));
   await setBubble(true);
+  await userEvent.press(screen.getAllByRole('button', { name: 'OK' }).at(-1)!);
+  expect(screen.queryByText('Turn on the bubble?')).toBeNull();
+  await setBubble(true);
   await userEvent.press(screen.getByRole('button', { name: 'Open settings' }));
   expect(screen.getByText('Could not read the picture')).toBeTruthy();
   expect(onRefresh).toHaveBeenCalledTimes(1);
@@ -400,6 +538,37 @@ test('overlay setup reports failures and rechecks permission when the app return
   expect(erase.getHome).toHaveBeenCalledTimes(1);
   expect(erase.setBubble).toHaveBeenCalledTimes(beforeUnavailableRefresh);
   await view.unmount();
+  appState.mockRestore();
+  os.restore();
+}, 15000);
+
+test('bubble setup reports failure if enabling it after granted permission fails', async () => {
+  const os = jest.replaceProperty(Platform, 'OS', 'android');
+  let stateHandler: ((state: string) => void | Promise<void>) | undefined;
+  const appState = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+    stateHandler = listener as (state: string) => void | Promise<void>;
+    return { remove: () => undefined };
+  });
+  const onRefresh = jest.fn();
+  erase.openPermission.mockResolvedValue(undefined);
+  erase.getHome.mockResolvedValue({ ...home, rows: [{ kind: 'overlay', title: 'Overlay', status: 'granted', need: 'requiredForBubble' }] });
+  erase.setBubble.mockRejectedValueOnce(new Error('bubble service unavailable'));
+  const blocked = {
+    ...home,
+    rows: [{ kind: 'overlay' as const, title: 'Overlay', status: 'denied' as const, need: 'requiredForBubble' as const }],
+  };
+  await render(
+    <LocaleGate>
+      <HomeScreen home={blocked} busy={false} notice="" onRefresh={onRefresh} onSettings={() => undefined} onCut={() => undefined} />
+    </LocaleGate>,
+  );
+  await setBubble(true);
+  await userEvent.press(screen.getByRole('button', { name: 'Open settings' }));
+  await flush();
+  await act(async () => { await stateHandler?.('active'); });
+  expect(screen.getByText('Could not read the picture')).toBeTruthy();
+  expect(erase.setBubble).toHaveBeenCalledWith(true);
+  expect(onRefresh).toHaveBeenCalled();
   appState.mockRestore();
   os.restore();
 }, 15000);
@@ -495,10 +664,28 @@ test('result copy and save report success and failure', async () => {
   await userEvent.press(screen.getByRole('button', { name: 'Copy' }));
   await flush();
   expect(screen.getByText('Copied')).toBeTruthy();
+  let releaseCopy: (value: string) => void = () => undefined;
+  erase.publishPng.mockImplementationOnce(() => new Promise<string>(resolve => { releaseCopy = resolve; }));
+  const copy = screen.getByRole('button', { name: 'Copy' });
+  const publishCalls = erase.publishPng.mock.calls.length;
+  await act(async () => {
+    copy.props.onClick();
+    copy.props.onClick();
+    await Promise.resolve();
+  });
+  expect(erase.publishPng).toHaveBeenCalledTimes(publishCalls + 1);
+  await act(async () => {
+    releaseCopy('copied');
+    for (let step = 0; step < 8; step += 1) await Promise.resolve();
+  });
   erase.publishPng.mockResolvedValueOnce('empty');
   await userEvent.press(screen.getByRole('button', { name: 'Copy' }));
   await flush();
   expect(screen.getByText('Nothing to copy')).toBeTruthy();
+  erase.publishPng.mockRejectedValueOnce(new Error('clipboard unavailable'));
+  await userEvent.press(screen.getByRole('button', { name: 'Copy' }));
+  await flush();
+  expect(screen.getByText('Could not save')).toBeTruthy();
   let release: (value: string) => void = () => undefined;
   erase.saveToGallery.mockImplementation(() => new Promise<string>(resolve => { release = resolve; }));
   const save = screen.getByRole('button', { name: 'Save' });
@@ -515,6 +702,10 @@ test('result copy and save report success and failure', async () => {
   expect(screen.getByText('Saved to gallery')).toBeTruthy();
   erase.saveToGallery.mockReset();
   erase.saveToGallery.mockResolvedValue('failed');
+  await userEvent.press(screen.getByRole('button', { name: 'Save' }));
+  await flush();
+  expect(screen.getByText('Could not save')).toBeTruthy();
+  erase.saveToGallery.mockRejectedValueOnce(new Error('gallery unavailable'));
   await userEvent.press(screen.getByRole('button', { name: 'Save' }));
   await flush();
   expect(screen.getByText('Could not save')).toBeTruthy();
@@ -612,6 +803,20 @@ test('the bubble reports a saved cutout and a missing one', async () => {
   erase.publishPng.mockResolvedValueOnce('empty');
   await userEvent.press(screen.getByRole('button', { name: 'Copy' }));
   await flush();
+  let releaseCopy: (value: string) => void = () => undefined;
+  erase.publishPng.mockImplementationOnce(() => new Promise<string>(resolve => { releaseCopy = resolve; }));
+  const copy = screen.getByRole('button', { name: 'Copy' });
+  const publishCalls = erase.publishPng.mock.calls.length;
+  await act(async () => {
+    copy.props.onClick();
+    copy.props.onClick();
+    await Promise.resolve();
+  });
+  expect(erase.publishPng).toHaveBeenCalledTimes(publishCalls + 1);
+  await act(async () => {
+    releaseCopy('copied');
+    for (let step = 0; step < 8; step += 1) await Promise.resolve();
+  });
   erase.saveToGallery.mockResolvedValueOnce('saved');
   await userEvent.press(screen.getByRole('button', { name: 'Save' }));
   await flush();
@@ -638,6 +843,8 @@ test('the bubble reports a saved cutout and a missing one', async () => {
   });
   await emitDevice('bubbleState', { ...bubble, phase: 'failed', editReady: true, previewPath: null });
   await flush();
+  expect(screen.getByRole('button', { name: 'Copy' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   await act(async () => {
     (screen.getByRole('button', { name: 'Hide bubble' }).props.onClick as () => void)();
     await Promise.resolve();
@@ -649,6 +856,65 @@ test('the bubble reports a saved cutout and a missing one', async () => {
   erase.getBubbleState.mockResolvedValue({ ...bubble, expanded: false });
   erase.saveToGallery.mockReset();
   erase.saveToGallery.mockResolvedValue('saved');
+  await screen.unmount();
+});
+
+test('a native bubble snapshot already queued during unmount is ignored', async () => {
+  const subscription = jest.spyOn(DeviceEventEmitter, 'addListener');
+  const view = await render(<LocaleGate><BubbleApp /></LocaleGate>);
+  await flush();
+  const listener = subscription.mock.calls.find(([event]) => event === 'bubbleState')?.[1] as ((snapshot: unknown) => void) | undefined;
+  expect(listener).toBeDefined();
+  await view.unmount();
+  await act(async () => {
+    listener?.({ ...bubble, expanded: true, revision: 20 });
+    await Promise.resolve();
+  });
+});
+
+test('the bubble preserves newer state and reports inference, reduced motion, and action errors', async () => {
+  let resolveInitial: (snapshot: typeof bubble & { revision?: number }) => void = () => undefined;
+  erase.getBubbleState.mockImplementation(() => new Promise(resolve => { resolveInitial = resolve; }));
+  const motionListener = jest.spyOn(AccessibilityInfo, 'addEventListener');
+  await render(<LocaleGate><BubbleApp /></LocaleGate>);
+  const reducedMotionChange = motionListener.mock.calls.at(-1)![1] as (value: boolean) => void;
+
+  await emitDevice('bubbleState', { ...bubble, phase: 'copied', expanded: true, editReady: true, previewPath: '/new.png', revision: 10 });
+  expect(screen.getByRole('button', { name: 'Cut another' })).toBeTruthy();
+  await emitDevice('bubbleState', { ...bubble, expanded: false, revision: 9 });
+  expect(screen.getByRole('button', { name: 'Cut another' })).toBeTruthy();
+  await act(async () => { resolveInitial({ ...bubble, expanded: false, revision: 1 }); });
+  await flush();
+  expect(screen.getByRole('button', { name: 'Cut another' })).toBeTruthy();
+
+  erase.bubbleAction.mockResolvedValueOnce({ ...bubble, expanded: false, revision: 8, message: 'copied' });
+  await userEvent.press(screen.getByRole('button', { name: 'Cut another' }));
+  await flush();
+  expect(screen.getByRole('button', { name: 'Cut another' })).toBeTruthy();
+  expect(screen.getByText('Copied')).toBeTruthy();
+
+  await emitDevice('bubbleState', { ...bubble, phase: 'working', stage: 'inference', expanded: true, previewPath: '/progress.png', revision: 11 });
+  expect(screen.getByText('Removing the background on this device…')).toBeTruthy();
+  await act(async () => { reducedMotionChange(true); });
+  await emitDevice('bubbleState', { ...bubble, phase: 'working', stage: 'exporting', percent: 78, expanded: true, previewPath: '/progress.png', revision: 12 });
+  expect(screen.getByText('78%')).toBeTruthy();
+
+  await emitDevice('bubbleState', { ...bubble, expanded: true, revision: 13 });
+  erase.bubbleAction.mockRejectedValueOnce(new Error('native action failed'));
+  await userEvent.press(screen.getByRole('button', { name: 'Gallery' }));
+  await flush();
+  expect(screen.getByText('Could not read the picture')).toBeTruthy();
+
+  await emitDevice('bubbleState', { ...bubble, phase: 'copied', expanded: true, editReady: true, previewPath: '/out.png', revision: 14 });
+  erase.publishPng.mockRejectedValueOnce(new Error('clipboard unavailable'));
+  await userEvent.press(screen.getByRole('button', { name: 'Copy' }));
+  await flush();
+  expect(screen.getByText('Could not save')).toBeTruthy();
+  erase.saveToGallery.mockRejectedValueOnce(new Error('gallery unavailable'));
+  await userEvent.press(screen.getByRole('button', { name: 'Save' }));
+  await flush();
+  expect(screen.getByText('Could not save')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
   await screen.unmount();
 });
 
@@ -668,6 +934,14 @@ function layoutCanvas(root: { props?: { onLayout?: (event: unknown) => void }; c
     for (const child of node.children ?? []) visit(child as { props?: { onLayout?: (event: unknown) => void }; children?: unknown[] });
   };
   return act(async () => { visit(root); });
+}
+
+type UiTreeNode = { type: string; props: Record<string, unknown>; children?: Array<UiTreeNode | string | null> };
+
+function flattenUiTree(node: unknown): UiTreeNode[] {
+  if (node == null || typeof node !== 'object') return [];
+  const item = node as UiTreeNode;
+  return [item, ...(item.children ?? []).flatMap(child => flattenUiTree(child))];
 }
 
 test('the editor previews absolute cutout alpha and exports that same mask while editing', async () => {
@@ -714,6 +988,10 @@ test('the editor previews absolute cutout alpha and exports that same mask while
   expect(copiedMask[0]).toBe(255);
   expect(copiedMask[10]).toBe(64);
   expect(erase.publishPng).toHaveBeenCalledWith('/masked.png');
+  erase.publishPng.mockResolvedValueOnce('empty');
+  await userEvent.press(screen.getByRole('button', { name: 'Copy' }));
+  await flush();
+  expect(screen.getByText('Nothing to copy')).toBeTruthy();
 
   await userEvent.press(screen.getByRole('button', { name: 'Erase' }));
   const compare = screen.getByRole('button', { name: 'Hold to compare' });
@@ -888,6 +1166,9 @@ test('the editor waits for its source image and reports a failed mask image crea
   const editor = await render(renderEditor());
   await flush();
   expect(screen.getByText('Opening')).toBeTruthy();
+  const compareWhileLoading = screen.getByRole('button', { name: 'Hold to compare' });
+  await userEvent.longPress(compareWhileLoading, { duration: 120 });
+  expect(screen.queryByTestId('sk-image')).toBeNull();
   const notReady = hands().draw;
   await act(async () => {
     notReady.handlers.onBegin({ x: 20, y: 20 });
@@ -989,12 +1270,66 @@ test('copy and save report empty masks and release the save lock after failed wr
 
 test('the editor lays the tools beside the picture on a wide window', async () => {
   const dimensions = jest.spyOn(Dimensions, 'get').mockReturnValue({ width: 900, height: 1200, scale: 1, fontScale: 1 });
-  await render(
+  const editor = await render(
     <LocaleGate>
       <EditorScreen originalPath="/o.png" cutoutPath="/c.png" width={4} height={4} note="wide" onBack={() => undefined} />
     </LocaleGate>,
   );
   expect(screen.getByText('wide')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Restore' })).toBeOnTheScreen();
+  expect(screen.getByRole('button', { name: 'Hold to compare' }).props.style).toEqual(expect.objectContaining({ minHeight: 48 }));
+  expect(flattenUiTree(editor.toJSON()).filter(node => node.props.className === 'gap-2 pt-3')).toHaveLength(1);
+  dimensions.mockRestore();
+});
+
+test('large text stacks editor tools and keeps actions comfortably tall', async () => {
+  const dimensions = jest.spyOn(Dimensions, 'get').mockReturnValue({ width: 390, height: 800, scale: 1, fontScale: 1.3 });
+  const editor = await render(
+    <LocaleGate>
+      <EditorScreen originalPath="/o.png" cutoutPath="/c.png" width={4} height={4} onBack={() => undefined} />
+    </LocaleGate>,
+  );
+  expect(flattenUiTree(editor.toJSON()).filter(node => node.props.className === 'gap-2 pt-3')).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Hold to compare' }).props.style).toEqual(expect.objectContaining({ minHeight: 48 }));
+  expect(screen.getByRole('button', { name: 'Fit to screen' }).props.style).toEqual(expect.objectContaining({ minHeight: 48 }));
+  expect(screen.getByRole('button', { name: 'Restore' })).toBeEnabled();
+  dimensions.mockRestore();
+});
+
+test('default-size editor keeps paired tool controls beside the image', async () => {
+  const dimensions = jest.spyOn(Dimensions, 'get').mockReturnValue({ width: 390, height: 800, scale: 1, fontScale: 1 });
+  const editor = await render(
+    <LocaleGate>
+      <EditorScreen originalPath="/o.png" cutoutPath="/c.png" width={4} height={4} onBack={() => undefined} />
+    </LocaleGate>,
+  );
+  const nodes = flattenUiTree(editor.toJSON());
+  expect(nodes.filter(node => node.props.className === 'gap-2 pt-4')).toHaveLength(1);
+  expect(nodes.filter(node => node.props.className === 'flex-row gap-2')).toHaveLength(3);
+  const eraseButton = screen.getByRole('button', { name: 'Erase' });
+  const restoreButton = screen.getByRole('button', { name: 'Restore' });
+  const eraseActiveColor = eraseButton.props.style.backgroundColor;
+  const restoreIdleColor = restoreButton.props.style.backgroundColor;
+  expect(eraseActiveColor).not.toBe(restoreIdleColor);
+  await userEvent.press(restoreButton);
+  expect(screen.getByRole('button', { name: 'Erase' }).props.style.backgroundColor).toBe(restoreIdleColor);
+  expect(screen.getByRole('button', { name: 'Restore' }).props.style.backgroundColor).toBe(eraseActiveColor);
+  await userEvent.press(screen.getByRole('button', { name: 'Erase' }));
+  dimensions.mockRestore();
+});
+
+test('landscape expanded editor retains a scrollable side toolbar beside the canvas', async () => {
+  const dimensions = jest.spyOn(Dimensions, 'get').mockReturnValue({ width: 1200, height: 800, scale: 1, fontScale: 1 });
+  const editor = await render(
+    <LocaleGate>
+      <EditorScreen originalPath="/o.png" cutoutPath="/c.png" width={4} height={4} onBack={() => undefined} />
+    </LocaleGate>,
+  );
+  const nodes = flattenUiTree(editor.toJSON());
+  expect(nodes.filter(node => node.props.className === 'min-h-0 flex-1 flex-row')).toHaveLength(1);
+  expect(nodes.filter(node => node.type === 'RCTScrollView' && (node.props.style as { width?: number } | undefined)?.width === 288)).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Erase' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Fit to screen' })).toBeEnabled();
   dimensions.mockRestore();
 });
 
@@ -1056,6 +1391,7 @@ test('screen duration is not recorded before AppState has become active', async 
 test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   const os = jest.replaceProperty(Platform, 'OS', 'android');
   const user = userEvent.setup();
+  const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
   const backs: Array<() => boolean> = [];
   const states: Array<(state: string) => void> = [];
   const backHandler = jest.spyOn(BackHandler, 'addEventListener').mockImplementation((_event, handler) => {
@@ -1071,6 +1407,7 @@ test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   await act(async () => { await Promise.resolve(); });
   await act(async () => { await new Promise<void>(resolve => setTimeout(resolve, 1500)); });
   await act(async () => { await Promise.resolve(); });
+  expect(openUrl).not.toHaveBeenCalled();
   expect(screen.getByText('Erase the extra or restore an edge')).toBeTruthy();
   await emitDevice('eraseOpenEdit', {});
   await act(async () => { await Promise.resolve(); });
@@ -1137,10 +1474,13 @@ test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   await flush();
   expect(erase.setPreferences).toHaveBeenLastCalledWith('dark', false, true);
   expect(screen.getByText('Could not save')).toBeTruthy();
-  const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
   await user.press(screen.getByRole('button', { name: 'Privacy policy' }));
-  expect(screen.getByText(/images and clipboard content are processed on your device/i)).toBeTruthy();
-  await user.press(screen.getByRole('button', { name: 'OK' }));
+  expect(openUrl).toHaveBeenCalledWith('https://raw.githubusercontent.com/kigya/cutout/92f8bbd300061e94c4fd193644d718eebebb2a94/PRIVACY.md');
+  expect(screen.queryByText(/images and clipboard content are processed on your device/i)).toBeNull();
+  openUrl.mockRejectedValueOnce(new Error('policy cannot open'));
+  await user.press(screen.getByRole('button', { name: 'Privacy policy' }));
+  await flush();
+  expect(screen.getByText('Could not open the privacy policy')).toBeTruthy();
   await user.press(screen.getByRole('button', { name: 'Send feedback' }));
   expect(openUrl).toHaveBeenCalledWith(expect.stringContaining('mailto:'));
   openUrl.mockRejectedValueOnce(new Error('no mail app'));

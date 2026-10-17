@@ -26,6 +26,7 @@ export const ms: Messages = {
   analyticsConsent: "Kongsi data penggunaan",
   crashConsent: "Kongsi laporan ranap",
   privacyPolicy: "Dasar privasi",
+  privacyOpenFailed: "Dasar privasi tidak dapat dibuka",
   feedback: "Hantar maklum balas",
   localProcessing: 'Semua pemprosesan berlaku pada peranti ini. Gambar tidak dihantar ke mana-mana.',
   cutHere: 'Potong di sini',

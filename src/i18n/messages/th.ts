@@ -26,6 +26,7 @@ export const th: Messages = {
   analyticsConsent: "แชร์ข้อมูลการใช้งาน",
   crashConsent: "แชร์รายงานข้อขัดข้อง",
   privacyPolicy: "นโยบายความเป็นส่วนตัว",
+  privacyOpenFailed: "ไม่สามารถเปิดนโยบายความเป็นส่วนตัวได้",
   feedback: "ส่งความคิดเห็น",
   localProcessing: 'การประมวลผลทั้งหมดเกิดขึ้นบนอุปกรณ์นี้ รูปไม่ถูกส่งไปที่ใด',
   cutHere: 'ตัดที่นี่',

@@ -21,6 +21,7 @@ app/src/debug/res/
 /.codex/
 /.serena/
 /.p-build-app/
+/.local-private/
 /AGENTS.md
 /docs/
 /prd/

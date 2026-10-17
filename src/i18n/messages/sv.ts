@@ -26,6 +26,7 @@ export const sv: Messages = {
   analyticsConsent: "Dela användningsdata",
   crashConsent: "Dela kraschrapporter",
   privacyPolicy: "Integritetspolicy",
+  privacyOpenFailed: "Det gick inte att öppna integritetspolicyn",
   feedback: "Skicka feedback",
   localProcessing: 'Allt bearbetas på den här enheten. Bilden skickas inte någonstans.',
   cutHere: 'Frilägg här',

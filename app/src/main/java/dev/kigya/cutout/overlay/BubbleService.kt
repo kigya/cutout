@@ -116,6 +116,14 @@ class BubbleService : LifecycleService() {
         super.onDestroy()
     }
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::params.isInitialized) {
+            clamp(frame())
+            updateLayout()
+        }
+    }
+
     private fun attach() {
         val frame = frame()
         val bubble = bubblePx()

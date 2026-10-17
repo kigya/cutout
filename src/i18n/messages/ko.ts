@@ -26,6 +26,7 @@ export const ko: Messages = {
   analyticsConsent: "사용 데이터 공유",
   crashConsent: "오류 보고 공유",
   privacyPolicy: "개인정보 처리방침",
+  privacyOpenFailed: "개인정보 처리방침을 열 수 없습니다",
   feedback: "의견 보내기",
   localProcessing: '모든 처리는 이 기기에서 합니다. 사진은 어디로도 전송되지 않습니다.',
   cutHere: '여기서 자르기',

@@ -7,13 +7,14 @@ import { useTheme } from '../../theme/ThemeProvider';
 type Props = {
   children: ReactNode;
   scroll?: boolean;
+  fullWidth?: boolean;
 };
 
-export function Screen({ children, scroll = false }: Props) {
+export function Screen({ children, scroll = false, fullWidth = false }: Props) {
   const insets = useSystemBars();
   const { colors } = useTheme();
   const { width } = useWindowDimensions();
-  const max = contentMax(width);
+  const max = fullWidth ? undefined : contentMax(width);
   const pad = pagePadding(width);
   const bars = {
     paddingTop: insets.top + SYSTEM_BAR_GAP,
