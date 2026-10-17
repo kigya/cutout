@@ -30,6 +30,7 @@ import dev.kigya.cutout.overlay.PickBus
 import dev.kigya.cutout.overlay.PickerActivity
 import dev.kigya.cutout.permissions.GrantStatus
 import dev.kigya.cutout.permissions.PermissionCenter
+import dev.kigya.cutout.permissions.PermissionRequestHistory
 import dev.kigya.cutout.permissions.SettingsNavigator
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -70,6 +71,7 @@ class EraseModule(
     private var cutJob: Job? = null
     private val reviews by lazy { dev.kigya.cutout.data.ReviewPrompts(reactApplicationContext) }
     private val telemetry by lazy { dev.kigya.cutout.data.AppTelemetry(reactApplicationContext) }
+    private val permissionHistory by lazy { PermissionRequestHistory(reactApplicationContext) }
 
     init {
         scope.launch {
@@ -95,6 +97,7 @@ class EraseModule(
             putString("theme", telemetry.theme)
             putBoolean("analytics", telemetry.analyticsEnabled)
             putBoolean("crashes", telemetry.crashEnabled)
+            putBoolean("diagnosticsNoticePending", telemetry.diagnosticsNoticePending)
         })
     }
 
@@ -103,6 +106,7 @@ class EraseModule(
         telemetry.update(theme, analytics, crashes)
         val preferences = Arguments.createMap().apply {
             putString("theme", telemetry.theme); putBoolean("analytics", telemetry.analyticsEnabled); putBoolean("crashes", telemetry.crashEnabled)
+            putBoolean("diagnosticsNoticePending", telemetry.diagnosticsNoticePending)
         }
         UiThreadUtil.runOnUiThread {
             if (reactApplicationContext.hasActiveReactInstance()) reactApplicationContext.emitDeviceEvent("preferencesChanged", preferences)
@@ -125,6 +129,12 @@ class EraseModule(
     }
 
     @ReactMethod
+    fun acknowledgeDiagnosticsNotice(promise: Promise) {
+        if (telemetry.acknowledgeDiagnosticsNotice()) promise.resolve(null)
+        else promise.reject("preferences", "Could not save diagnostics notice state")
+    }
+
+    @ReactMethod
     fun getHome(promise: Promise) {
         scope.launch {
             try {
@@ -139,7 +149,10 @@ class EraseModule(
                     enabled = false
                 }
                 val rows = withContext(Dispatchers.IO) { permissions.snapshot() }
-                promise.resolve(homeMap(enabled, rows))
+                val history = withContext(Dispatchers.IO) {
+                    rows.associate { it.kind to permissionHistory.entry(it.kind) }
+                }
+                promise.resolve(homeMap(enabled, rows, history))
             } catch (cancelled: CancellationException) {
                 promise.reject("cancelled", "Home refresh cancelled")
                 throw cancelled
@@ -207,8 +220,44 @@ class EraseModule(
             promise.reject("kind", kind)
             return
         }
-        navigator.open(parsed)
-        promise.resolve(null)
+        if (navigator.open(parsed)) promise.resolve(null)
+        else promise.reject("permission", "Could not open permission settings")
+    }
+
+    @ReactMethod
+    fun beginPermissionRequest(kind: String, promise: Promise) {
+        val parsed = kindOf(kind)
+        if (parsed == null) {
+            promise.reject("kind", kind)
+            return
+        }
+        try { promise.resolve(permissionHistory.begin(parsed)) }
+        catch (_: Exception) { promise.reject("permission", "Could not record permission request") }
+    }
+
+    @ReactMethod
+    fun completePermissionRequest(kind: String, attemptId: String, blocked: Boolean, promise: Promise) {
+        val parsed = kindOf(kind)
+        if (parsed == null || attemptId.isBlank()) {
+            promise.reject("kind", kind)
+            return
+        }
+        scope.launch {
+            try {
+                val status = withContext(Dispatchers.IO) {
+                    permissions.snapshot().firstOrNull { it.kind == parsed }?.status ?: GrantStatus.Unknown
+                }
+                permissionHistory.complete(parsed, attemptId, status, blocked)
+                promise.resolve(null)
+            } catch (cancelled: CancellationException) {
+                runCatching { permissionHistory.complete(parsed, attemptId, GrantStatus.Unknown, blocked = false) }
+                promise.reject("cancelled", "Permission check cancelled")
+                throw cancelled
+            } catch (_: Exception) {
+                runCatching { permissionHistory.complete(parsed, attemptId, GrantStatus.Unknown, blocked = false) }
+                promise.reject("permission", "Could not check permission status")
+            }
+        }
     }
 
     @ReactMethod
@@ -281,6 +330,7 @@ class EraseModule(
             "file" -> BubbleUiEvent.FromFile
             "refine" -> BubbleUiEvent.Refine
             "dismiss" -> BubbleUiEvent.Dismiss
+            "collapse" -> BubbleUiEvent.Collapse
             "again" -> BubbleUiEvent.Again
             else -> null
         }
@@ -290,9 +340,14 @@ class EraseModule(
         }
         scope.launch {
             val revision = presenter.state.value.revision
+            if ((event == BubbleUiEvent.Collapse || event == BubbleUiEvent.Dismiss) &&
+                !presenter.state.value.expanded && !presenter.state.value.readingClipboard) {
+                promise.resolve(bubbleMap(presenter.state.value))
+                return@launch
+            }
             presenter.onEvent(event)
             val next = when (event) {
-                BubbleUiEvent.Toggle, BubbleUiEvent.Dismiss, BubbleUiEvent.Refine, BubbleUiEvent.Again ->
+                BubbleUiEvent.Toggle, BubbleUiEvent.Dismiss, BubbleUiEvent.Collapse, BubbleUiEvent.Refine, BubbleUiEvent.Again ->
                     presenter.state.first { it.revision != revision }
                 BubbleUiEvent.FromClipboard, BubbleUiEvent.FromGallery, BubbleUiEvent.FromFile ->
                     withTimeoutOrNull(180_000) {
@@ -505,7 +560,11 @@ class EraseModule(
         return overlay
     }
 
-    private fun homeMap(bubbleEnabled: Boolean, snapshot: List<dev.kigya.cutout.permissions.PermissionSnapshot>): WritableMap {
+    private fun homeMap(
+        bubbleEnabled: Boolean,
+        snapshot: List<dev.kigya.cutout.permissions.PermissionSnapshot>,
+        histories: Map<PermissionKind, dev.kigya.cutout.permissions.PermissionHistoryEntry>,
+    ): WritableMap {
         val family = permissions.family()
         val rows = Arguments.createArray()
         snapshot.forEach { snapshot ->
@@ -517,7 +576,10 @@ class EraseModule(
             row.putString("kind", kindName(snapshot.kind))
             row.putString("title", title(snapshot.kind))
             row.putString("status", statusName(snapshot.status))
-            row.putString("need", needName(permissionNeed(snapshot.kind)))
+            row.putString("need", needName(permissionNeed(snapshot.kind, bubbleEnabled)))
+            val history = histories[snapshot.kind]
+            row.putInt("deniedCount", history?.deniedCount ?: 0)
+            row.putBoolean("permanentlyDenied", history?.permanentlyDenied == true && snapshot.status == GrantStatus.Denied)
             rows.pushMap(row)
         }
         val map = Arguments.createMap()

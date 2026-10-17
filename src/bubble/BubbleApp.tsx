@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, ActivityIndicator, DeviceEventEmitter, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { AccessibilityInfo, ActivityIndicator, DeviceEventEmitter, Image, Pressable, ScrollView, Text, ToastAndroid, View } from 'react-native';
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { SweepPreview } from '../components/SweepPreview';
 import { Notice } from '../components/ui/notice';
@@ -32,7 +32,7 @@ export function BubbleApp() {
   localeRef.current = locale;
   const [state, setState] = useState<BubbleSnapshot>(EMPTY);
   const [note, setNote] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [action, setAction] = useState<'copy' | 'save' | 'openEditor' | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
   const savingRef = useRef(false);
   const actionRef = useRef(false);
@@ -73,9 +73,11 @@ export function BubbleApp() {
   const frame = bubbleFrame(state);
   useEffect(() => {
     Erase.setBubbleSize(frame.width, frame.height);
+  }, [frame.height, frame.width]);
+  useEffect(() => {
     side.value = state.anchorEnd ? 1 : -1;
     panel.value = state.expanded && !reducedMotion ? withTiming(1, { duration: 160 }) : state.expanded ? 1 : 0;
-  }, [frame.height, frame.width, panel, reducedMotion, side, state.anchorEnd, state.expanded]);
+  }, [panel, reducedMotion, side, state.anchorEnd, state.expanded]);
 
   const panelStyle = useAnimatedStyle(() => ({
     opacity: panel.value,
@@ -83,8 +85,9 @@ export function BubbleApp() {
   }));
 
   async function run(action: 'toggle' | 'clipboard' | 'gallery' | 'file' | 'refine' | 'dismiss' | 'again') {
-    if (actionRef.current) return;
+    if (actionRef.current || savingRef.current) return;
     actionRef.current = true;
+    if (action === 'refine') setAction('openEditor');
     if (action === 'clipboard' || action === 'gallery' || action === 'file') {
       setNote('');
     }
@@ -96,10 +99,12 @@ export function BubbleApp() {
         setState(next);
       }
       setNote(localizeMessage(localeRef.current, next.message));
+      if (action === 'refine' && !next.expanded) ToastAndroid.show(t('editInApp'), ToastAndroid.SHORT);
     } catch {
       setNote(t('readFailed'));
     } finally {
       actionRef.current = false;
+      setAction(null);
     }
   }
 
@@ -107,44 +112,56 @@ export function BubbleApp() {
     await Erase.hideBubble();
   }
 
+  async function collapse(message: string) {
+    // Collapse is idempotent; a delayed success can never reopen the panel.
+    const next = await Erase.bubbleAction('collapse');
+    const revision = next.revision ?? revisionRef.current + 1;
+    if (revision >= revisionRef.current) {
+      revisionRef.current = revision;
+      setState(next);
+    }
+    ToastAndroid.show(message, ToastAndroid.SHORT);
+    AccessibilityInfo.announceForAccessibility(message);
+    setNote('');
+  }
+
   async function copy() {
-    if (!state.previewPath || savingRef.current) return;
+    if (!state.previewPath || savingRef.current || actionRef.current) return;
     savingRef.current = true;
-    setSaving(true);
-    setNote(t('copying'));
+    setAction('copy');
     try {
       const status = await Erase.publishPng(state.previewPath);
-      setNote(status === 'copied' ? t('copied') : t('nothingToCopy'));
-      AccessibilityInfo.announceForAccessibility(status === 'copied' ? t('copied') : t('nothingToCopy'));
+      if (status === 'copied') await collapse(t('copied'));
+      else setNote(t('nothingToCopy'));
     } catch {
       setNote(t('saveFailed'));
     } finally {
       savingRef.current = false;
-      setSaving(false);
+      setAction(null);
     }
   }
 
   async function save() {
-    if (savingRef.current) return;
+    if (!state.previewPath || savingRef.current || actionRef.current) return;
     const path = state.previewPath as string;
     savingRef.current = true;
-    setSaving(true);
-    setNote(t('saving'));
+    setAction('save');
     try {
       const status = await Erase.saveToGallery(path);
       const message = t(savePhase(status) === 'saved' ? 'saved' : 'saveFailed');
-      setNote(message);
-      AccessibilityInfo.announceForAccessibility(message);
+      if (savePhase(status) === 'saved') await collapse(message);
+      else setNote(message);
     } catch {
       setNote(t('saveFailed'));
     } finally {
       savingRef.current = false;
-      setSaving(false);
+      setAction(null);
     }
   }
 
   const actions = (
-    <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 12 }} className="flex-1 rounded-3xl" style={{ backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 }}>
+    <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 12 }} className="flex-1 rounded-3xl" style={{ backgroundColor: `${colors.surface}E6`, borderColor: colors.border, borderWidth: 1 }}>
+      <Pressable accessibilityRole="button" accessibilityLabel={t('hideBubble')} onPress={() => { void hide(); }} style={{ minHeight: 48, alignSelf: 'flex-end', justifyContent: 'center', paddingHorizontal: 16 }}><Text style={{ color: colors.text }}>✕</Text></Pressable>
       <Text className="mb-2 text-base font-semibold" style={{ color: colors.text }}>{busy ? t('cutting') : t('cutBackground')}</Text>
       {busy ? (
         <View>
@@ -157,13 +174,13 @@ export function BubbleApp() {
       {result ? (
         <View>
           {state.previewPath ? (
-            <Image source={{ uri: `file://${state.previewPath}` }} style={{ height: 96, width: '100%', backgroundColor: colors.surfaceRaised }} className="mb-2 rounded-xl" resizeMode="contain" />
+            <BubblePreview path={state.previewPath} background={colors.surfaceRaised} label={t('done')} />
           ) : null}
           <Notice message={note} />
-          <Action label={saving ? t('copying') : t('copy')} disabled={saving || !state.previewPath} onPress={() => { void copy(); }} colors={colors} />
-          <Action label={saving ? t('saving') : t('save')} disabled={saving || !state.previewPath} onPress={() => { void save(); }} colors={colors} />
-          {state.editReady ? <Action label={t('editInApp')} disabled={saving} onPress={() => { void run('refine'); }} colors={colors} /> : null}
-          <Action label={t('another')} disabled={saving} onPress={() => { void run('again'); }} colors={colors} />
+          <Action label={t('copy')} loading={action === 'copy'} disabled={action != null || !state.previewPath} onPress={() => { void copy(); }} colors={colors} />
+          <Action label={t('save')} loading={action === 'save'} disabled={action != null || !state.previewPath} onPress={() => { void save(); }} colors={colors} />
+          {state.editReady ? <Action label={t('editInApp')} loading={action === 'openEditor'} disabled={action != null} onPress={() => { void run('refine'); }} colors={colors} /> : null}
+          <Action label={t('another')} disabled={action != null} onPress={() => { void run('again'); }} colors={colors} />
         </View>
       ) : null}
       {!busy && !result ? (
@@ -184,19 +201,11 @@ export function BubbleApp() {
           accessibilityRole="button"
           accessibilityLabel={t('cutBackground')}
           className="items-center justify-center overflow-hidden rounded-full"
-          style={{ width: 76, height: 76, marginTop: 4, marginLeft: 4, backgroundColor: colors.primary }}
+          style={{ width: 76, height: 76, marginTop: 4, marginLeft: 4, backgroundColor: colors.primary, opacity: 0.7 }}
           onPress={() => { void run('toggle'); }}>
           <Image source={require('../assets/bubble-icon.png')} style={{ width: 48, height: 48, tintColor: colors.onPrimary }} resizeMode="contain" />
         </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('hideBubble')}
-          className="absolute right-0 top-0 h-12 w-12 items-center justify-center"
-          onPress={() => { void hide(); }}>
-          <View className="h-12 w-12 items-center justify-center rounded-full" style={{ backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }}>
-            <Text className="text-xs" style={{ color: colors.text }}>✕</Text>
-          </View>
-        </Pressable>
+
       </View>
       {state.expanded ? <View style={{ width: 12 }} /> : null}
       {state.expanded ? (
@@ -208,16 +217,22 @@ export function BubbleApp() {
   );
 }
 
-function Action({ label, onPress, disabled = false, colors }: { label: string; onPress: () => void; disabled?: boolean; colors: ReturnType<typeof useTheme>['colors'] }) {
+function Action({ label, onPress, disabled = false, loading = false, colors }: { label: string; onPress: () => void; disabled?: boolean; loading?: boolean; colors: ReturnType<typeof useTheme>['colors'] }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ disabled }}
+      accessibilityState={{ disabled, busy: loading }}
       disabled={disabled}
-      className="mb-2 min-h-12 items-center justify-center rounded-2xl px-2 py-2"
+      className="mb-2 min-h-12 flex-row gap-2 items-center justify-center rounded-2xl px-2 py-2"
       style={{ minHeight: 48, backgroundColor: colors.surfaceRaised, opacity: disabled ? 0.5 : 1, borderColor: colors.border, borderWidth: 1 }}
       onPress={onPress}>
+      {loading ? <ActivityIndicator size="small" color={colors.text} /> : null}
       <Text className="text-sm font-semibold" style={{ color: colors.text }}>{label}</Text>
     </Pressable>
   );
 }
+
+const BubblePreview = memo(function BubblePreview({ path, background, label }: { path: string; background: string; label: string }) {
+  const source = useMemo(() => ({ uri: `file://${path}` }), [path]);
+  return <Image accessibilityLabel={label} source={source} style={{ height: 96, width: '100%', backgroundColor: background }} className="mb-2 rounded-xl" resizeMode="contain" />;
+});

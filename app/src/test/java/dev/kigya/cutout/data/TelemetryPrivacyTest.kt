@@ -24,6 +24,7 @@ class TelemetryPrivacyTest {
     private val crashes = mockk<FirebaseCrashlytics>(relaxed = true)
     private val remote = mockk<FirebaseRemoteConfig>(relaxed = true)
     @Before fun setUp() {
+        app.getSharedPreferences("cutout_preferences", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         mockkStatic(FirebaseApp::class, FirebaseAnalytics::class, FirebaseCrashlytics::class, FirebaseRemoteConfig::class)
         every { FirebaseApp.getApps(any()) } returns listOf(mockk())
         every { FirebaseAnalytics.getInstance(any()) } returns analytics
@@ -31,14 +32,14 @@ class TelemetryPrivacyTest {
         every { FirebaseRemoteConfig.getInstance() } returns remote
     }
     @After fun tearDown() { unmockkAll() }
-    @Test fun `native startup denies analytics and every advertising use before JS consent`() {
+    @Test fun `native startup applies one time diagnostics baseline while denying every advertising use`() {
         AppTelemetry(app).applyConsent()
-        verify { analytics.setAnalyticsCollectionEnabled(false) }
-        verify { analytics.setConsent(match { consent -> consent.size == 4 && consent.values.all { it == FirebaseAnalytics.ConsentStatus.DENIED } }) }
-        verify { crashes.setCrashlyticsCollectionEnabled(false); crashes.deleteUnsentReports() }
-        verify(exactly = 0) { remote.fetchAndActivate() }
+        verify { analytics.setAnalyticsCollectionEnabled(true) }
+        verify { analytics.setConsent(match { consent -> consent.size == 4 && consent[FirebaseAnalytics.ConsentType.ANALYTICS_STORAGE] == FirebaseAnalytics.ConsentStatus.GRANTED && consent.filterKeys { it != FirebaseAnalytics.ConsentType.ANALYTICS_STORAGE }.values.all { it == FirebaseAnalytics.ConsentStatus.DENIED } }) }
+        verify { crashes.setCrashlyticsCollectionEnabled(true) }
+        verify { remote.fetchAndActivate() }
         AppTelemetry(app).event("cutout_started")
-        verify(exactly = 0) { analytics.logEvent(any(), any()) }
+        verify { analytics.logEvent("cutout_started", any()) }
     }
     @Test fun `analytics and crashes can be consented separately and withdrawal resets analytics`() {
         val telemetry = AppTelemetry(app)

@@ -177,18 +177,18 @@ final class CutoutGalleryFlowTests: XCTestCase {
     let photoCell = app.cells.firstMatch
     let photoThumbnail = app.images.matching(NSPredicate(format: "label BEGINSWITH[c] 'Photo,'")).firstMatch
     let deadline = Date().addingTimeInterval(45)
-    while Date() < deadline && !photoCell.exists && !photoThumbnail.exists {
+    while Date() < deadline && !photoThumbnail.exists && !photoCell.exists {
       RunLoop.current.run(until: Date().addingTimeInterval(0.25))
     }
-    if photoCell.exists {
-      photoCell.tap()
-    } else if photoThumbnail.exists {
+    if photoThumbnail.exists {
       // Photos exposes thumbnail accessibility but its remote picker view does not mark
       // the Image node as hittable. Tap the center of its visible frame.
       let frame = photoThumbnail.frame
       XCTAssertGreaterThan(frame.width, 0)
       app.coordinate(withNormalizedOffset: CGVector(dx: frame.midX / app.frame.width,
                                                       dy: frame.midY / app.frame.height)).tap()
+    } else if photoCell.exists {
+      photoCell.tap()
     } else {
       XCTFail("Photos picker showed no selectable image.\n\(app.debugDescription)")
       return

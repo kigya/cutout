@@ -131,6 +131,58 @@ class BubblePresenterTest {
     }
 
     @Test
+    fun `explicit collapse is idempotent and preserves the completed result`() = runTest {
+        val f = fixture()
+        f.presenter.onEvent(BubbleUiEvent.Collapse)
+        val unchanged = f.presenter.state.value
+        assertEquals(0, unchanged.revision)
+
+        f.presenter.onEvent(BubbleUiEvent.Toggle)
+        coEvery { f.cutter.cut(any(), any()) } returns CutOutcome.CopiedRaster(
+            message = Messages.COPIED,
+            previewPath = "/cache/result.png",
+            edit = EditFiles("/cache/original.png", "/cache/result.png", 2, 2),
+            rasterizedSvg = false,
+        )
+        f.picks.offer(IncomingImage.Raster(byteArrayOf(1)), PickBus.TARGET_BUBBLE)
+        f.awaitState { it.phase == BubblePhase.Copied }
+        val result = f.presenter.state.value
+        f.presenter.onEvent(BubbleUiEvent.Collapse)
+        assertFalse(f.presenter.state.value.expanded)
+        assertEquals(result.phase, f.presenter.state.value.phase)
+        assertEquals(result.previewPath, f.presenter.state.value.previewPath)
+        assertEquals(result.message, f.presenter.state.value.message)
+        assertEquals(result.percent, f.presenter.state.value.percent)
+        val revision = f.presenter.state.value.revision
+        f.presenter.onEvent(BubbleUiEvent.Collapse)
+        assertEquals("a repeated collapse must not publish another state", revision, f.presenter.state.value.revision)
+    }
+
+    @Test
+    fun `refine collapses only after launch and leaves errors visible`() = runTest {
+        val files = EditFiles("/tmp/original.png", "/tmp/result.png", 10, 10)
+        val successContext = RecordingContext(RuntimeEnvironment.getApplication())
+        val success = fixture(successContext)
+        every { success.sessions.pending } returns files
+        success.presenter.onEvent(BubbleUiEvent.Toggle)
+        success.presenter.onEvent(BubbleUiEvent.Refine)
+        assertFalse(success.presenter.state.value.expanded)
+        assertTrue(success.presenter.state.value.editReady)
+        assertNull(success.presenter.state.value.message)
+        assertEquals(1, successContext.started.size)
+
+        val failureContext = RecordingContext(RuntimeEnvironment.getApplication(), ActivityNotFoundException("missing"))
+        val failure = fixture(failureContext)
+        every { failure.sessions.pending } returns files
+        failure.presenter.onEvent(BubbleUiEvent.Toggle)
+        failure.presenter.onEvent(BubbleUiEvent.Refine)
+        assertTrue(failure.presenter.state.value.expanded)
+        assertFalse(failure.presenter.state.value.editReady)
+        assertEquals(Messages.READ_FAILED, failure.presenter.state.value.message)
+        verify { failure.sessions.openRequested = false }
+    }
+
+    @Test
     fun `picker and clipboard launch failures return visible failed state`() = runTest {
         val context = RecordingContext(RuntimeEnvironment.getApplication(), ActivityNotFoundException("missing"))
         val f = fixture(context)
@@ -171,7 +223,9 @@ class BubblePresenterTest {
         val context = RecordingContext(RuntimeEnvironment.getApplication())
         val f = fixture(context)
         f.presenter.onEvent(BubbleUiEvent.Refine)
+        assertTrue(f.presenter.state.value.expanded)
         assertFalse(f.presenter.state.value.editReady)
+        assertEquals(Messages.READ_FAILED, f.presenter.state.value.message)
         val files = EditFiles("original.png", "cutout.png", 20, 10)
         every { f.sessions.pending } returns files
         f.presenter.onEvent(BubbleUiEvent.Refine)

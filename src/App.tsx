@@ -34,21 +34,57 @@ type Route =
 const FEEDBACK_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyX2iZxF_QSEC_Lg_9vFdFmwCxXOtwz6EpIeqALAY81j05ntV6Tw6HJsQAO6jRhhPsQ/exec';
 
 const EMPTY: HomeSnapshot = { rows: [], bubbleEnabled: false, showXiaomiTip: false, clipboardReady: false };
-const PRIVACY_POLICY_URL = 'https://raw.githubusercontent.com/kigya/cutout/f93fef6e20e903c65abd38d6d243b2ea26f8a428/PRIVACY.md';
+const PRIVACY_POLICY_URL = 'https://kigya.github.io/cutout/privacy/';
 
 export default function App() {
   const [preferences, setPreferences] = useState<AppPreferences>(DEFAULT_PREFERENCES);
-  useEffect(() => { void readPreferences().then(setPreferences); }, []);
-  const updatePreferences = async (next: AppPreferences) => {
-    await writePreferences(next);
-    setPreferences(next);
+  const savedPreferences = useRef<AppPreferences | null>(null);
+  const preferenceRead = useRef<Promise<AppPreferences> | null>(null);
+  const preferenceWrites = useRef<Promise<void>>(Promise.resolve());
+  const loadPreferences = useCallback(() => {
+    if (!preferenceRead.current) {
+      preferenceRead.current = readPreferences(true).then(value => {
+        savedPreferences.current = value;
+        setPreferences(value);
+        return value;
+      }).catch(error => {
+        preferenceRead.current = null;
+        throw error;
+      });
+    }
+    return preferenceRead.current;
+  }, []);
+  useEffect(() => {
+    void loadPreferences().catch(() => undefined);
+    // Native processing shares this model session; preparation never extends splash.
+    void Erase.prepareModel().catch(() => undefined);
+  }, [loadPreferences]);
+  const mutatePreferences = (apply: (current: AppPreferences) => Promise<AppPreferences>) => {
+    const write = preferenceWrites.current.catch(() => undefined).then(async () => {
+      // Never persist UI defaults over an unread or failed native preference snapshot.
+      const current = savedPreferences.current ?? await loadPreferences();
+      const next = await apply(current);
+      savedPreferences.current = next;
+      setPreferences(next);
+    });
+    preferenceWrites.current = write;
+    return write;
   };
+  const updatePreferences = (patch: Partial<AppPreferences>) => mutatePreferences(async current => {
+    const next = { ...current, ...patch };
+    await writePreferences(next);
+    return next;
+  });
+  const dismissDiagnosticsNotice = () => mutatePreferences(async current => {
+    await Erase.acknowledgeDiagnosticsNotice?.();
+    return { ...current, diagnosticsNoticePending: false };
+  });
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider mode={preferences.theme}>
           <LocaleGate>
-            <Root preferences={preferences} onPreferences={updatePreferences} />
+            <Root preferences={preferences} onPreferences={updatePreferences} onDismissDiagnosticsNotice={dismissDiagnosticsNotice} />
           </LocaleGate>
         </ThemeProvider>
       </SafeAreaProvider>
@@ -56,7 +92,7 @@ export default function App() {
   );
 }
 
-function Root({ preferences, onPreferences }: { preferences: AppPreferences; onPreferences: (value: AppPreferences) => Promise<void> }) {
+function Root({ preferences, onPreferences, onDismissDiagnosticsNotice }: { preferences: AppPreferences; onPreferences: (value: Partial<AppPreferences>) => Promise<void>; onDismissDiagnosticsNotice: () => Promise<void> }) {
   const { locale, t } = useLocale();
   const { colors } = useTheme();
   const [booting, setBooting] = useState(true);
@@ -77,7 +113,8 @@ function Root({ preferences, onPreferences }: { preferences: AppPreferences; onP
   }, []);
 
   const refresh = useCallback(async () => {
-    setHome(await Erase.getHome());
+    const next = await Erase.getHome();
+    setHome(current => JSON.stringify(current) === JSON.stringify(next) ? current : next);
   }, []);
 
   const openEdit = useCallback(async () => {
@@ -96,7 +133,7 @@ function Root({ preferences, onPreferences }: { preferences: AppPreferences; onP
     });
     const bubbleFlag = DeviceEventEmitter.addListener('bubbleEnabled', event => {
       const enabled = (event as { enabled?: boolean }).enabled === true;
-      setHome(current => ({ ...current, bubbleEnabled: enabled }));
+      setHome(current => current.bubbleEnabled === enabled ? current : { ...current, bubbleEnabled: enabled });
     });
     const progress = DeviceEventEmitter.addListener('eraseProgress', event => {
       const percent = clampPercent((event as { percent?: number }).percent ?? 0);
@@ -181,6 +218,10 @@ function Root({ preferences, onPreferences }: { preferences: AppPreferences; onP
     }
   }
 
+  const refreshHome = useCallback(() => { void refresh(); }, [refresh]);
+  const showSettings = useCallback(() => setRoute({ name: 'settings' }), []);
+  const openPrivacy = () => { void Linking.openURL(PRIVACY_POLICY_URL).catch(() => setNotice(t('privacyOpenFailed'))); };
+
   if (booting) return <SplashScreen onDone={finishBoot} />;
 
   return (
@@ -191,8 +232,11 @@ function Root({ preferences, onPreferences }: { preferences: AppPreferences; onP
           home={home}
           busy={busy}
           notice={notice}
-          onRefresh={() => { void refresh(); }}
-          onSettings={() => setRoute({ name: 'settings' })}
+          onRefresh={refreshHome}
+          onSettings={showSettings}
+          diagnosticsNoticePending={preferences.diagnosticsNoticePending}
+          onDismissDiagnosticsNotice={() => { void onDismissDiagnosticsNotice().catch(() => setNotice(t('saveFailed'))); }}
+          onPrivacy={openPrivacy}
           onCut={source => { void beginCut(source); }}
         />
       ) : null}
@@ -201,12 +245,12 @@ function Root({ preferences, onPreferences }: { preferences: AppPreferences; onP
           showXiaomiTip={home.showXiaomiTip}
           notice={notice}
           themeMode={preferences.theme}
-          onThemeModeChange={theme => { void onPreferences({ ...preferences, theme }).catch(() => setNotice(t('saveFailed'))); }}
+          onThemeModeChange={theme => { void onPreferences({ theme }).catch(() => setNotice(t('saveFailed'))); }}
           analyticsEnabled={preferences.analytics}
           crashEnabled={preferences.crashes}
-          onAnalyticsChange={analytics => { void onPreferences({ ...preferences, analytics }).catch(() => setNotice(t('saveFailed'))); }}
-          onCrashChange={crashes => { void onPreferences({ ...preferences, crashes }).catch(() => setNotice(t('saveFailed'))); }}
-          onOpenPrivacy={() => { void Linking.openURL(PRIVACY_POLICY_URL).catch(() => setNotice(t('privacyOpenFailed'))); }}
+          onAnalyticsChange={analytics => { void onPreferences({ analytics }).catch(() => setNotice(t('saveFailed'))); }}
+          onCrashChange={crashes => { void onPreferences({ crashes }).catch(() => setNotice(t('saveFailed'))); }}
+          onOpenPrivacy={openPrivacy}
           onFeedback={() => setRoute({ name: 'feedback' })}
           onBack={() => setRoute({ name: 'home' })}
           onLanguage={() => setRoute({ name: 'language' })}

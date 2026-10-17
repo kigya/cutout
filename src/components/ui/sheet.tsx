@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { AccessibilityInfo, Modal, Pressable, ScrollView, Text, useWindowDimensions } from 'react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { AccessibilityInfo, Modal, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { pagePadding } from '../../logic/layout';
 import { SYSTEM_BAR_GAP, useSystemBars } from '../../logic/systemBars';
@@ -13,9 +13,10 @@ type Props = {
   onClose: () => void;
   actionLabel?: string;
   onAction?: () => void;
+  icon?: ReactNode;
 };
 
-export function Sheet({ title, body, visible, closeLabel, onClose, actionLabel, onAction }: Props) {
+export function Sheet({ title, body, visible, closeLabel, onClose, actionLabel, onAction, icon }: Props) {
   const insets = useSystemBars();
   const { colors } = useTheme();
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -51,7 +52,10 @@ export function Sheet({ title, body, visible, closeLabel, onClose, actionLabel, 
             paddingRight: insets.right + pad,
           }}
           onPress={() => undefined}>
-          <Text className="text-lg font-semibold" style={{ color: colors.text }}>{title}</Text>
+          <View className="flex-row items-center gap-3">
+            {icon ? <View className="h-12 w-12 items-center justify-center rounded-2xl" style={{ backgroundColor: colors.surfaceRaised }}>{icon}</View> : null}
+            <Text className="flex-1 text-lg font-semibold" style={{ color: colors.text }}>{title}</Text>
+          </View>
           <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingBottom: 4 }}>
             <Text className="mt-3 text-base leading-6" style={{ color: colors.textMuted }}>{body}</Text>
           </ScrollView>

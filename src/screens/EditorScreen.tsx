@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, Text, useWindowDimensions, View } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import { useDerivedValue, useSharedValue } from 'react-native-reanimated';
 import {
@@ -20,6 +20,7 @@ import { BackButton } from '../components/ui/backButton';
 import { Button } from '../components/ui/button';
 import { Notice } from '../components/ui/notice';
 import { Screen } from '../components/ui/screen';
+import { Sheet } from '../components/ui/sheet';
 import { useLocale } from '../i18n/LocaleGate';
 import { useTheme } from '../theme/ThemeProvider';
 import { base64ToBytes, bytesToBase64 } from '../logic/bytes';
@@ -77,6 +78,7 @@ function createMaskImage(alpha: Uint8Array, sourceAlpha: Uint8Array, width: numb
 export function EditorScreen({ originalPath, cutoutPath, width, height, note, onBack }: Props) {
   const { t } = useLocale();
   const { colors } = useTheme();
+  const [photosDenied, setPhotosDenied] = useState(false);
   const checker = useMemo(() => Skia.RuntimeEffect.Make(CHECKER), []);
   const window = useWindowDimensions();
   const wide = windowTier(window.width) === 'expanded';
@@ -89,7 +91,7 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
   const [box, setBox] = useState({ width: 1, height: 1 });
   const [maskImage, setMaskImage] = useState<SkImage | null>(null);
   const [comparing, setComparing] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [exportAction, setExportAction] = useState<'copy' | 'save' | null>(null);
   const savingRef = useRef(false);
   const [historyState, setHistoryState] = useState({ undo: false, redo: false });
   const alphaRef = useRef<Uint8Array | null>(null);
@@ -201,7 +203,7 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
   }, [height, t, width]);
 
   function beginStroke(x: number, y: number, userScale: number, tx: number, ty: number) {
-    if (!ready || !alphaRef.current) return;
+    if (!ready || !alphaRef.current || savingRef.current) return;
     activeStroke.current = true;
     activeTool.current = toolRef.current;
     activeRadius.current = radiusRef.current;
@@ -302,6 +304,9 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
   }
 
   async function copy() {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setExportAction('copy');
     try {
       const path = await exportCurrent();
       if (!path) {
@@ -312,13 +317,16 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
       setMessage(status === 'copied' ? t('copied') : t('nothingToCopy'));
     } catch {
       setMessage(t('nothingToCopy'));
+    } finally {
+      savingRef.current = false;
+      setExportAction(null);
     }
   }
 
   async function save() {
     if (savingRef.current) return;
     savingRef.current = true;
-    setSaving(true);
+    setExportAction('save');
     try {
       const path = await exportCurrent();
       if (!path) {
@@ -326,12 +334,13 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
         return;
       }
       const status = await Erase.saveToGallery(path);
+      if (Platform.OS === 'ios' && status === 'denied') setPhotosDenied(true);
       setMessage(t(savePhase(status) === 'saved' ? 'saved' : 'saveFailed'));
     } catch {
       setMessage(t('saveFailed'));
     } finally {
       savingRef.current = false;
-      setSaving(false);
+      setExportAction(null);
     }
   }
 
@@ -441,11 +450,11 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
       <View className="flex-row items-center justify-between">
         <BackButton onPress={onBack} />
         <View className="flex-row gap-4">
-          <Pressable accessibilityRole="button" accessibilityState={{ disabled: saving }} disabled={saving} className="h-12 justify-center" onPress={() => { void save(); }}>
-            <Text className="text-base font-semibold" style={{ color: colors.text }}>{t('save')}</Text>
+          <Pressable accessibilityRole="button" accessibilityState={{ disabled: exportAction != null, busy: exportAction === 'save' }} disabled={exportAction != null} className="h-12 justify-center" onPress={() => { void save(); }}>
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>{exportAction === 'save' ? <ActivityIndicator size="small" color={colors.text} /> : null}<Text className="text-base font-semibold" style={{ color: colors.text }}>{t('save')}</Text></View>
           </Pressable>
-          <Pressable accessibilityRole="button" className="h-12 justify-center" onPress={() => { void copy(); }}>
-            <Text className="text-base font-semibold" style={{ color: colors.accent }}>{t('copy')}</Text>
+          <Pressable accessibilityRole="button" accessibilityState={{ disabled: exportAction != null, busy: exportAction === 'copy' }} disabled={exportAction != null} className="h-12 justify-center" onPress={() => { void copy(); }}>
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>{exportAction === 'copy' ? <ActivityIndicator size="small" color={colors.accent} /> : null}<Text className="text-base font-semibold" style={{ color: colors.accent }}>{t('copy')}</Text></View>
           </Pressable>
         </View>
       </View>
@@ -463,6 +472,10 @@ export function EditorScreen({ originalPath, cutoutPath, width, height, note, on
         ) : tools}
       </View>
       <View className="h-2" />
+      <Sheet visible={photosDenied} title={t('photosPermissionTitle')} body={t('photosPermissionBody')} closeLabel={t('notNow')} onClose={() => setPhotosDenied(false)} actionLabel={t('openSettings')} onAction={() => {
+        setPhotosDenied(false);
+        void Erase.openPermission('photos').catch(() => setMessage(t('saveFailed')));
+      }} />
     </Screen>
   );
 }

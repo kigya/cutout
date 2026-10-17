@@ -68,8 +68,12 @@ class OemRoutingTest {
     @Test fun `overlay alone is required for Bubble and no optional setting blocks in-app cutting`() {
         PermissionKind.entries.forEach { kind ->
             assertEquals(
-                if (kind == PermissionKind.Overlay) PermissionNeed.RequiredForBubble else PermissionNeed.Optional,
+                PermissionNeed.Optional,
                 permissionNeed(kind),
+            )
+            assertEquals(
+                if (kind == PermissionKind.Overlay) PermissionNeed.RequiredForBubble else PermissionNeed.Optional,
+                permissionNeed(kind, bubbleEnabled = true),
             )
             assertFalse("$kind must not block in-app cutout", blocksInAppCutout(kind))
         }

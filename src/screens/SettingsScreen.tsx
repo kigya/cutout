@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import { BackButton } from '../components/ui/backButton';
 import { Notice } from '../components/ui/notice';
-import { PathText } from '../components/ui/pathText';
 import { Screen } from '../components/ui/screen';
 import { Sheet } from '../components/ui/sheet';
 import { useLocale } from '../i18n/LocaleGate';
@@ -24,18 +23,39 @@ type Props = {
   onFeedback?: () => void;
 };
 
-export function SettingsScreen({ notice = '', showXiaomiTip, onBack, onLanguage, themeMode = 'system', onThemeModeChange, analyticsEnabled, crashEnabled, onAnalyticsChange, onCrashChange, onOpenPrivacy, onFeedback }: Props) {
+export function SettingsScreen({ notice = '', showXiaomiTip, onBack, onLanguage, themeMode = 'system', onThemeModeChange, analyticsEnabled = true, crashEnabled = true, onAnalyticsChange, onCrashChange, onOpenPrivacy, onFeedback }: Props) {
   const { t } = useLocale();
   const { colors } = useTheme();
-  const [sheet, setSheet] = useState<'flow' | 'licenses' | null>(null);
+  const [sheet, setSheet] = useState<'flow' | 'licenses' | 'bubble' | 'clipboard' | 'save' | 'editor' | 'model' | null>(null);
   const licenses = LICENSES;
+  const tip = showXiaomiTip ? t('bubblePinXiaomi') : t('bubblePinGeneric');
+  const faq = sheet === 'bubble' || sheet === 'clipboard' || sheet === 'save' || sheet === 'editor' || sheet === 'model' ? sheet : null;
   const body = sheet === 'flow'
     ? t('flow')
     : sheet === 'licenses'
       ? licenses.map(entry => `${entry.name} · ${entry.license}`).join('\n')
-      : '';
-  const title = sheet === 'flow' ? t('howItWorks') : t('licenses');
-  const tip = showXiaomiTip ? t('bubblePinXiaomi') : t('bubblePinGeneric');
+      : faq === 'bubble'
+        ? `${t('faqBubbleBody')}\n\n${tip}`
+        : faq === 'clipboard'
+          ? t(Platform.OS === 'ios' ? 'faqClipboardBodyIos' : 'faqClipboardBody')
+        : faq
+          ? t(`faq${faq[0].toUpperCase()}${faq.slice(1)}Body` as 'faqClipboardBody' | 'faqSaveBody' | 'faqEditorBody' | 'faqModelBody')
+          : '';
+  const title = sheet === 'flow'
+    ? t('howItWorks')
+    : sheet === 'licenses'
+      ? t('licenses')
+      : faq === 'bubble'
+        ? t('faqBubbleTitle')
+        : faq === 'clipboard'
+          ? t('faqClipboardTitle')
+          : faq === 'save'
+            ? t('faqSaveTitle')
+            : faq === 'editor'
+              ? t('faqEditorTitle')
+              : faq === 'model'
+                ? t('faqModelTitle')
+                : '';
 
   return (
     <Screen scroll>
@@ -58,13 +78,12 @@ export function SettingsScreen({ notice = '', showXiaomiTip, onBack, onLanguage,
       {onCrashChange ? <ConsentRow label={t('crashConsent')} value={crashEnabled === true} onChange={onCrashChange} colors={colors} /> : null}
       {onOpenPrivacy ? <Row label={t('privacyPolicy')} onPress={onOpenPrivacy} colors={colors} /> : null}
       {onFeedback ? <Row label={t('feedback')} onPress={onFeedback} colors={colors} /> : null}
-      {Platform.OS === 'android' ? <>
-        <Text className="mb-1 mt-8 text-sm font-medium" style={{ color: colors.textMuted }}>{t('problems')}</Text>
-        <View className="rounded-3xl border px-4 py-4" style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
-          <Text className="text-base font-semibold" style={{ color: colors.text }}>{t('bubbleDisappears')}</Text>
-          <PathText text={tip} />
-        </View>
-      </> : null}
+      <Text className="mb-1 mt-8 text-sm font-medium" style={{ color: colors.textMuted }}>{t('faqHeading')}</Text>
+      {Platform.OS === 'android' ? <Row label={t('faqBubbleTitle')} onPress={() => setSheet('bubble')} colors={colors} /> : null}
+      <Row label={t('faqClipboardTitle')} onPress={() => setSheet('clipboard')} colors={colors} />
+      <Row label={t('faqSaveTitle')} onPress={() => setSheet('save')} colors={colors} />
+      <Row label={t('faqEditorTitle')} onPress={() => setSheet('editor')} colors={colors} />
+      <Row label={t('faqModelTitle')} onPress={() => setSheet('model')} colors={colors} />
       <Sheet title={title} body={body} visible={sheet != null} closeLabel={t('gotIt')} onClose={() => setSheet(null)} />
     </Screen>
   );

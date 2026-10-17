@@ -9,7 +9,8 @@ class SessionRulesTest {
     @Test
     fun everyPermissionIsOptionalForCuttingInsideTheApp() {
         PermissionKind.entries.forEach { kind ->
-            assertEquals(if (kind == PermissionKind.Overlay) PermissionNeed.RequiredForBubble else PermissionNeed.Optional, permissionNeed(kind))
+            assertEquals(PermissionNeed.Optional, permissionNeed(kind))
+            assertEquals(if (kind == PermissionKind.Overlay) PermissionNeed.RequiredForBubble else PermissionNeed.Optional, permissionNeed(kind, bubbleEnabled = true))
             assertFalse(blocksInAppCutout(kind))
         }
     }

@@ -1,9 +1,10 @@
-import { useRef, useState } from 'react';
-import { AccessibilityInfo, Image, Text, View } from 'react-native';
+import { memo, useMemo, useRef, useState } from 'react';
+import { AccessibilityInfo, Image, Platform, Text, View } from 'react-native';
 import { BackButton } from '../components/ui/backButton';
 import { Button } from '../components/ui/button';
 import { Notice } from '../components/ui/notice';
 import { Screen } from '../components/ui/screen';
+import { Sheet } from '../components/ui/sheet';
 import { useLocale } from '../i18n/LocaleGate';
 import { localizeMessage } from '../i18n/catalogs';
 import { savePhase } from '../logic/save';
@@ -19,8 +20,9 @@ type Props = {
 export function ResultScreen({ session, onBack, onEdit }: Props) {
   const { t, locale } = useLocale();
   const { colors } = useTheme();
+  const [photosDenied, setPhotosDenied] = useState(false);
   const [note, setNote] = useState(localizeMessage(locale, session.message));
-  const [saving, setSaving] = useState(false);
+  const [action, setAction] = useState<'copy' | 'save' | null>(null);
   const savingRef = useRef(false);
   const path = session.cutoutPath;
   const editable = canEdit(session);
@@ -28,8 +30,7 @@ export function ResultScreen({ session, onBack, onEdit }: Props) {
   async function copy() {
     if (!path || savingRef.current) return;
     savingRef.current = true;
-    setSaving(true);
-    setNote(t('copying'));
+    setAction('copy');
     try {
       const status = await Erase.publishPng(path);
       const message = status === 'copied' ? t('copied') : t('nothingToCopy');
@@ -39,17 +40,17 @@ export function ResultScreen({ session, onBack, onEdit }: Props) {
       setNote(t('saveFailed'));
     } finally {
       savingRef.current = false;
-      setSaving(false);
+      setAction(null);
     }
   }
 
   async function save() {
     if (savingRef.current) return;
     savingRef.current = true;
-    setSaving(true);
-    setNote(t('saving'));
+    setAction('save');
     try {
       const status = await Erase.saveToGallery(path as string);
+      if (Platform.OS === 'ios' && status === 'denied') setPhotosDenied(true);
       const message = t(savePhase(status) === 'saved' ? 'saved' : 'saveFailed');
       setNote(message);
       AccessibilityInfo.announceForAccessibility(message);
@@ -57,7 +58,7 @@ export function ResultScreen({ session, onBack, onEdit }: Props) {
       setNote(t('saveFailed'));
     } finally {
       savingRef.current = false;
-      setSaving(false);
+      setAction(null);
     }
   }
 
@@ -67,20 +68,30 @@ export function ResultScreen({ session, onBack, onEdit }: Props) {
       <Text accessibilityRole="header" className="mt-2 text-3xl font-semibold" style={{ color: colors.text }}>{t('done')}</Text>
       <Notice message={note} />
       {path ? (
-        <Image accessibilityLabel={t('done')} source={{ uri: `file://${path}` }} className="mt-4 flex-1 rounded-3xl" style={{ backgroundColor: colors.surfaceRaised }} resizeMode="contain" />
+        <ResultPreview path={path} label={t('done')} background={colors.surfaceRaised} />
       ) : (
         <View className="flex-1" />
       )}
       <View className="gap-2 pb-2 pt-4">
-        <Button label={saving ? t('copying') : t('copy')} disabled={saving || !path} onPress={() => { void copy(); }} />
+        <Button label={t('copy')} loading={action === 'copy'} disabled={action != null || !path} onPress={() => { void copy(); }} />
         <Button
-          label={saving ? t('saving') : t('save')}
+          label={t('save')}
+          loading={action === 'save'}
           tone="ghost"
-          disabled={saving || !path || session.status === 'svg'}
+          disabled={action != null || !path || session.status === 'svg'}
           onPress={() => { void save(); }}
         />
         {editable ? <Button label={t('editInApp')} tone="ghost" onPress={onEdit} /> : null}
       </View>
+      <Sheet visible={photosDenied} title={t('photosPermissionTitle')} body={t('photosPermissionBody')} closeLabel={t('notNow')} onClose={() => setPhotosDenied(false)} actionLabel={t('openSettings')} onAction={() => {
+        setPhotosDenied(false);
+        void Erase.openPermission('photos').catch(() => setNote(t('saveFailed')));
+      }} />
     </Screen>
   );
 }
+
+const ResultPreview = memo(function ResultPreview({ path, label, background }: { path: string; label: string; background: string }) {
+  const source = useMemo(() => ({ uri: `file://${path}` }), [path]);
+  return <Image accessibilityLabel={label} source={source} className="mt-4 flex-1 rounded-3xl" style={{ backgroundColor: background }} resizeMode="contain" />;
+});

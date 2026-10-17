@@ -17,11 +17,9 @@ class SettingsNavigator @Inject constructor(
     @ApplicationContext private val context: Context,
     private val permissions: PermissionCenter,
 ) {
-    fun open(kind: PermissionKind) {
+    fun open(kind: PermissionKind): Boolean {
         val attempts = settingsAttempts(permissions.family(), kind)
-        for (attempt in attempts) {
-            if (start(attempt)) return
-        }
+        return attempts.any(::start)
     }
 
     private fun start(attempt: SettingsAttempt): Boolean {

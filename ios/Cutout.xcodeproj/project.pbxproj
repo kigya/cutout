@@ -56,10 +56,10 @@
 		00E356ED1AD99517003FC882 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
 		00E356ED1AD99517003FC883 /* CutoutTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CutoutTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		00E356ED1AD99517003FC889 /* CutoutNativeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutoutTests/CutoutNativeTests.swift; sourceTree = "<group>"; };
-		00E356ED1AD99517003FC990 /* UnitTests.debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Cutout/UnitTests.debug.xcconfig; sourceTree = "<group>"; };
-		00E356ED1AD99517003FC991 /* UnitTests.release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Cutout/UnitTests.release.xcconfig; sourceTree = "<group>"; };
 		00E356ED1AD99517003FC923 /* CutoutUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CutoutUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		00E356ED1AD99517003FC929 /* CutoutGalleryFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CutoutGalleryFlowTests.swift; sourceTree = "<group>"; };
+		00E356ED1AD99517003FC990 /* UnitTests.debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Cutout/UnitTests.debug.xcconfig; sourceTree = "<group>"; };
+		00E356ED1AD99517003FC991 /* UnitTests.release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Cutout/UnitTests.release.xcconfig; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* Cutout.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cutout.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Cutout/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Cutout/Info.plist; sourceTree = "<group>"; };

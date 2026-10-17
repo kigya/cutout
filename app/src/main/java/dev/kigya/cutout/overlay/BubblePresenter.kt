@@ -64,6 +64,7 @@ class BubblePresenter @Inject constructor(
         when (event) {
             BubbleUiEvent.Toggle -> if (_state.value.expanded) collapse() else expand()
             BubbleUiEvent.Dismiss -> collapse()
+            BubbleUiEvent.Collapse -> collapse()
             BubbleUiEvent.FromClipboard -> {
                 mutate {
                     it.copy(
@@ -101,9 +102,8 @@ class BubblePresenter @Inject constructor(
     }
 
     fun collapse() {
-        mutate {
-            it.copy(expanded = false, readingClipboard = false)
-        }
+        if (!_state.value.expanded && !_state.value.readingClipboard) return
+        mutate { it.copy(expanded = false, readingClipboard = false) }
     }
 
     private fun expand() {
@@ -200,15 +200,20 @@ class BubblePresenter @Inject constructor(
 
     private fun openEditor() {
         if (sessions.pending == null) {
-            mutate { it.copy(editReady = false) }
+            mutate { it.copy(editReady = false, message = Messages.READ_FAILED, expanded = true) }
             return
         }
-        sessions.requestOpen()
-        mutate { it.copy(editReady = true) }
         val intent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(MainActivity.EXTRA_EDIT, true)
-        context.startActivity(intent)
+        try {
+            sessions.requestOpen()
+            context.startActivity(intent)
+            mutate { it.copy(editReady = true, message = null, expanded = false) }
+        } catch (_: Exception) {
+            sessions.openRequested = false
+            mutate { it.copy(editReady = false, message = Messages.READ_FAILED, expanded = true) }
+        }
     }
 
     private fun cut(image: IncomingImage) {

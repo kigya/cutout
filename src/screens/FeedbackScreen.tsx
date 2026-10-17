@@ -142,14 +142,14 @@ export function FeedbackScreen({ endpoint, onBack, timeoutMs = 30_000 }: Props) 
         editable={!sending}
         maxLength={4000}
         multiline
-        scrollEnabled={false}
+        scrollEnabled
         returnKeyType="done"
         submitBehavior="blurAndSubmit"
         onSubmitEditing={Keyboard.dismiss}
         onChangeText={updateMessage}
         placeholder={t('feedbackMessageLabel')}
         placeholderTextColor={colors.textMuted}
-        style={{ minHeight: 150, borderRadius: 16, borderWidth: 1, borderColor: fieldErrors.message ? colors.warning : colors.border, backgroundColor: colors.surface, paddingHorizontal: 16, paddingVertical: 12, color: colors.text, fontSize: 16, textAlignVertical: 'top' }}
+        style={{ minHeight: 150, maxHeight: 220, borderRadius: 16, borderWidth: 1, borderColor: fieldErrors.message ? colors.warning : colors.border, backgroundColor: colors.surface, paddingHorizontal: 16, paddingVertical: 12, color: colors.text, fontSize: 16, textAlignVertical: 'top' }}
         defaultValue=""
       />
       <View className="mt-1 flex-row justify-between">

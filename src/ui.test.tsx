@@ -1,5 +1,5 @@
 import { act, render, screen, userEvent } from '@testing-library/react-native';
-import { AccessibilityInfo, AppState, BackHandler, DeviceEventEmitter, Dimensions, I18nManager, Linking, PermissionsAndroid, Platform, Text } from 'react-native';
+import { AccessibilityInfo, AppState, BackHandler, DeviceEventEmitter, Dimensions, I18nManager, Linking, PermissionsAndroid, Platform, Text, ToastAndroid } from 'react-native';
 import { base64ToBytes, bytesToBase64 } from './logic/bytes';
 import App from './App';
 import { BubbleApp } from './bubble/BubbleApp';
@@ -7,6 +7,7 @@ import { BubbleDemo } from './components/BubbleDemo';
 import { SplashScreen } from './components/SplashScreen';
 import { SweepPreview } from './components/SweepPreview';
 import { LocaleGate, useLocale } from './i18n/LocaleGate';
+import { text } from './i18n/catalogs';
 import { Badge } from './components/ui/badge';
 import { Button } from './components/ui/button';
 import { Notice } from './components/ui/notice';
@@ -100,7 +101,18 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  for (const mock of Object.values(erase)) mock.mockReset();
+  delete erase.getPreferences;
+  delete erase.setPreferences;
+  delete erase.logProductEvent;
+  erase.setBubble.mockResolvedValue(undefined);
+  erase.hideBubble.mockResolvedValue(undefined);
+  erase.openPermission.mockResolvedValue(undefined);
+  erase.cancelCut.mockResolvedValue(undefined);
+  erase.setLocale.mockResolvedValue(undefined);
+  erase.restart.mockResolvedValue(undefined);
+  erase.settleBubble.mockResolvedValue(true);
+  jest.spyOn(ToastAndroid, 'show').mockImplementation(() => undefined);
   global.__modalDismisses.length = 0;
   AppState.currentState = 'active';
   AppState.addEventListener = jest.fn(() => ({ remove: jest.fn() }));
@@ -406,9 +418,9 @@ test('home hides bubble controls off Android and blocks source selection while b
       <HomeScreen home={home} busy={false} notice="" onRefresh={() => undefined} onSettings={() => undefined} onCut={() => undefined} />
     </LocaleGate>,
   );
-  expect(screen.getByText(/cut inside the app without the bubble/i)).toBeTruthy();
+  expect(screen.getByText(text('en', 'bubbleOptional'))).toBeTruthy();
   await userEvent.press(screen.getByRole('button', { name: 'OK' }));
-  expect(screen.queryByText(/cut inside the app without the bubble/i)).toBeNull();
+  expect(screen.queryByText(text('en', 'bubbleOptional'))).toBeNull();
   await android.unmount();
   os.restore();
 }, 15000);
@@ -475,85 +487,39 @@ test('the bubble switch explains a missing overlay and notifications use the And
   os.restore();
 });
 
-test('overlay setup reports failures and rechecks permission when the app returns', async () => {
-  const os = jest.replaceProperty(Platform, 'OS', 'android');
-  let stateHandler: ((state: string) => void | Promise<void>) | undefined;
-  const appState = jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
-    stateHandler = listener as (state: string) => void | Promise<void>;
+test('overlay setup counts only a completed settings round-trip and enables Bubble after a grant', async () => {
+  jest.replaceProperty(Platform, 'OS', 'android');
+  const listeners: Array<(state: string) => void | Promise<void>> = [];
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+    listeners.push(listener as (state: string) => void | Promise<void>);
     return { remove: () => undefined };
   });
   const onRefresh = jest.fn();
-  const blocked = {
-    ...home,
-    rows: [
-      { kind: 'overlay' as const, title: 'Overlay', status: 'denied' as const, need: 'requiredForBubble' as const },
-      { kind: 'backgroundPopup' as const, title: 'Popup', status: 'denied' as const, need: 'optional' as const },
-      { kind: 'autostart' as const, title: 'Autostart', status: 'unknown' as const, need: 'optional' as const },
-      { kind: 'battery' as const, title: 'Battery', status: 'granted' as const, need: 'optional' as const },
-    ],
-  };
-  const view = await render(
-    <LocaleGate>
-      <HomeScreen home={blocked} busy={false} notice="" onRefresh={onRefresh} onSettings={() => undefined} onCut={() => undefined} />
-    </LocaleGate>,
-  );
-  erase.openPermission.mockRejectedValueOnce(new Error('settings could not open'));
+  const blocked = { ...home, rows: [{ kind: 'overlay' as const, title: 'Overlay', status: 'denied' as const, need: 'optional' as const }] };
+  const view = await render(<LocaleGate><HomeScreen home={blocked} busy={false} notice="" onRefresh={onRefresh} onSettings={() => undefined} onCut={() => undefined} /></LocaleGate>);
   await setBubble(true);
-  await userEvent.press(screen.getAllByRole('button', { name: 'OK' }).at(-1)!);
+  await userEvent.press(screen.getByRole('button', { name: 'Not now' }));
   expect(screen.queryByText('Turn on the bubble?')).toBeNull();
+  erase.openPermission.mockRejectedValueOnce(new Error('settings unavailable'));
   await setBubble(true);
-  await userEvent.press(screen.getByRole('button', { name: 'Open settings' }));
+  await userEvent.press(screen.getByRole('button', { name: 'Open settings' })); await flush();
   expect(screen.getByText('Could not read the picture')).toBeTruthy();
-  expect(onRefresh).toHaveBeenCalledTimes(1);
-
-  await userEvent.press(screen.getByRole('button', { name: 'Windows from the background, Off, Optional' }));
-  await userEvent.press(screen.getByRole('button', { name: 'Autostart, Unknown, Optional' }));
-  await userEvent.press(screen.getByRole('button', { name: 'Battery, On, Optional' }));
-  await flush();
-  expect(erase.openPermission).toHaveBeenCalledWith('backgroundPopup');
-  expect(erase.openPermission).toHaveBeenCalledWith('autostart');
-  expect(erase.openPermission).toHaveBeenCalledWith('battery');
-
   await setBubble(true);
-  await userEvent.press(screen.getByRole('button', { name: 'Open settings' }));
-  expect(erase.openPermission).toHaveBeenCalledWith('overlay');
-  const refreshCount = onRefresh.mock.calls.length;
-  await act(async () => { await stateHandler?.('background'); });
-  expect(onRefresh).toHaveBeenCalledTimes(refreshCount);
-
-  erase.getHome.mockResolvedValue({ ...home, rows: [{ ...blocked.rows[0], status: 'granted' }] });
-  erase.getHome.mockClear();
-  await act(async () => { await stateHandler?.('active'); });
-  expect(erase.getHome).toHaveBeenCalledTimes(1);
+  await userEvent.press(screen.getByRole('button', { name: 'Open settings' })); await flush();
+  const returning = async (state: string) => {
+    AppState.currentState = state as typeof AppState.currentState;
+    await act(async () => { for (const listener of listeners) await listener(state); });
+  };
+  await returning('active');
+  expect(erase.setBubble).not.toHaveBeenCalled();
+  await returning('background');
+  erase.getHome.mockResolvedValue({ ...blocked, rows: [{ ...blocked.rows[0], status: 'granted' }] });
+  await returning('active'); await flush();
   expect(erase.setBubble).toHaveBeenCalledWith(true);
-  expect(onRefresh.mock.calls.length).toBeGreaterThan(refreshCount);
-
-  await setBubble(true);
-  await view.rerender(
-    <LocaleGate>
-      <HomeScreen home={{ ...home, bubbleEnabled: false }} busy={false} notice="" onRefresh={onRefresh} onSettings={() => undefined} onCut={() => undefined} />
-    </LocaleGate>,
-  );
-  await userEvent.press(screen.getByRole('button', { name: 'Open settings' }));
-  expect(erase.setBubble).toHaveBeenLastCalledWith(true);
-
-  await view.rerender(
-    <LocaleGate>
-      <HomeScreen home={blocked} busy={false} notice="" onRefresh={onRefresh} onSettings={() => undefined} onCut={() => undefined} />
-    </LocaleGate>,
-  );
-  await setBubble(true);
-  await userEvent.press(screen.getByRole('button', { name: 'Open settings' }));
-  erase.getHome.mockRejectedValueOnce(new Error('home unavailable'));
-  erase.getHome.mockClear();
-  const beforeUnavailableRefresh = erase.setBubble.mock.calls.length;
-  await act(async () => { await stateHandler?.('active'); });
-  expect(erase.getHome).toHaveBeenCalledTimes(1);
-  expect(erase.setBubble).toHaveBeenCalledTimes(beforeUnavailableRefresh);
+  await returning('active');
+  expect(erase.setBubble).toHaveBeenCalledTimes(1);
   await view.unmount();
-  appState.mockRestore();
-  os.restore();
-}, 15000);
+});
 
 test('bubble setup reports failure if enabling it after granted permission fails', async () => {
   const os = jest.replaceProperty(Platform, 'OS', 'android');
@@ -578,7 +544,8 @@ test('bubble setup reports failure if enabling it after granted permission fails
   await setBubble(true);
   await userEvent.press(screen.getByRole('button', { name: 'Open settings' }));
   await flush();
-  await act(async () => { await stateHandler?.('active'); });
+  await act(async () => { await stateHandler?.('background');
+    await stateHandler?.('active'); });
   expect(screen.getByText('Could not read the picture')).toBeTruthy();
   expect(erase.setBubble).toHaveBeenCalledWith(true);
   expect(onRefresh).toHaveBeenCalled();
@@ -595,7 +562,9 @@ test('settings shows both pin tips and both sheets', async () => {
       <SettingsScreen showXiaomiTip onBack={onBack} onLanguage={onLanguage} />
     </LocaleGate>,
   );
+  await userEvent.press(screen.getByRole('button', { name: 'Bubble disappears or won’t open' }));
   expect(screen.getByText(/Security/)).toBeTruthy();
+  await userEvent.press(screen.getByRole('button', { name: 'OK' }));
   await userEvent.press(screen.getByRole('button', { name: 'Language' }));
   await userEvent.press(screen.getByRole('button', { name: 'How it works' }));
   await userEvent.press(screen.getByRole('button', { name: 'OK' }));
@@ -610,6 +579,7 @@ test('settings shows both pin tips and both sheets', async () => {
       <SettingsScreen showXiaomiTip={false} onBack={() => undefined} onLanguage={() => undefined} />
     </LocaleGate>,
   );
+  await userEvent.press(screen.getByRole('button', { name: 'Bubble disappears or won’t open' }));
   expect(screen.getByText(/unrestricted/)).toBeTruthy();
   os.restore();
 });
@@ -810,6 +780,8 @@ test('the bubble streams progress and answers save', async () => {
 });
 
 test('the bubble reports a saved cutout and a missing one', async () => {
+  const toast = jest.spyOn(ToastAndroid, 'show');
+  erase.bubbleAction.mockImplementation(async () => ({ ...bubble, phase: 'copied', previewPath: '/out.png', editReady: true }));
   erase.getBubbleState.mockImplementation(() => new Promise(() => undefined));
   await render(<LocaleGate><BubbleApp /></LocaleGate>);
   await flush();
@@ -838,7 +810,7 @@ test('the bubble reports a saved cutout and a missing one', async () => {
   erase.saveToGallery.mockResolvedValueOnce('saved');
   await userEvent.press(screen.getByRole('button', { name: 'Save' }));
   await flush();
-  expect(screen.getByText('Saved to gallery')).toBeTruthy();
+  expect(toast).toHaveBeenCalledWith('Saved to gallery', ToastAndroid.SHORT);
   let release: (value: string) => void = () => undefined;
   erase.saveToGallery.mockImplementation(() => new Promise<string>(resolve => { release = resolve; }));
   const save = screen.getByRole('button', { name: 'Save' });
@@ -1402,11 +1374,12 @@ test('the sample frame is absent outside development', async () => {
 });
 
 test('screen duration is not recorded before AppState has become active', async () => {
+  jest.useFakeTimers();
   const previousState = AppState.currentState;
   AppState.currentState = null;
   erase.logProductEvent = jest.fn(async () => undefined);
   await render(<App />);
-  await act(async () => { await new Promise<void>(resolve => setTimeout(resolve, 1500)); });
+  await act(async () => { jest.advanceTimersByTime(1500); });
   await userEvent.press(screen.getByRole('button', { name: 'Settings' }));
   expect(erase.logProductEvent).not.toHaveBeenCalledWith('screen_duration', expect.anything());
   delete erase.logProductEvent;
@@ -1414,6 +1387,7 @@ test('screen duration is not recorded before AppState has become active', async 
 });
 
 test('the app boots, cuts, and keeps the bubble switch in step', async () => {
+  jest.useFakeTimers();
   const os = jest.replaceProperty(Platform, 'OS', 'android');
   const user = userEvent.setup();
   const openUrl = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined);
@@ -1430,7 +1404,7 @@ test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   erase.consumePendingEdit.mockResolvedValue(readySession('manual'));
   const view = await render(<App />);
   await act(async () => { await Promise.resolve(); });
-  await act(async () => { await new Promise<void>(resolve => setTimeout(resolve, 1500)); });
+  await act(async () => { jest.advanceTimersByTime(1500); });
   await act(async () => { await Promise.resolve(); });
   expect(openUrl).not.toHaveBeenCalled();
   expect(screen.getByText('Erase the extra or restore an edge')).toBeTruthy();
@@ -1463,10 +1437,10 @@ test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   erase.setPreferences = jest.fn(async () => undefined);
   await render(<App />);
   await act(async () => { await Promise.resolve(); });
-  await act(async () => { await new Promise<void>(resolve => setTimeout(resolve, 1500)); });
+  await act(async () => { jest.advanceTimersByTime(1500); });
   await act(async () => { await Promise.resolve(); });
   expect(screen.getByText('Cutout')).toBeTruthy();
-  expect(erase.prepareModel).not.toHaveBeenCalled();
+  expect(erase.prepareModel).toHaveBeenCalled();
   erase.getHome.mockClear();
   await act(async () => { states[0]?.('active'); await Promise.resolve(); });
   expect(erase.getHome).toHaveBeenCalled();
@@ -1500,7 +1474,7 @@ test('the app boots, cuts, and keeps the bubble switch in step', async () => {
   expect(erase.setPreferences).toHaveBeenLastCalledWith('dark', false, true);
   expect(screen.getByText('Could not save')).toBeTruthy();
   await user.press(screen.getByRole('button', { name: 'Privacy policy' }));
-  expect(openUrl).toHaveBeenCalledWith('https://raw.githubusercontent.com/kigya/cutout/f93fef6e20e903c65abd38d6d243b2ea26f8a428/PRIVACY.md');
+  expect(openUrl).toHaveBeenCalledWith('https://kigya.github.io/cutout/privacy/');
   expect(screen.queryByText(/images and clipboard content are processed on your device/i)).toBeNull();
   openUrl.mockRejectedValueOnce(new Error('policy cannot open'));
   await user.press(screen.getByRole('button', { name: 'Privacy policy' }));

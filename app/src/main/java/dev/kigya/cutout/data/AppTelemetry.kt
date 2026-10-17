@@ -11,9 +11,20 @@ import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 class AppTelemetry(context: Context) {
     private val appContext = context.applicationContext
     private val preferences = context.getSharedPreferences("cutout_preferences", Context.MODE_PRIVATE)
+    init {
+        if (!preferences.getBoolean(DIAGNOSTICS_BASELINE, false)) {
+            preferences.edit()
+                .putBoolean("analytics", true)
+                .putBoolean("crashes", true)
+                .putBoolean(DIAGNOSTICS_NOTICE_PENDING, true)
+                .putBoolean(DIAGNOSTICS_BASELINE, true)
+                .commit()
+        }
+    }
     val analyticsEnabled get() = preferences.getBoolean("analytics", false)
     val crashEnabled get() = preferences.getBoolean("crashes", false)
     val theme get() = preferences.getString("theme", "system") ?: "system"
+    val diagnosticsNoticePending get() = preferences.getBoolean(DIAGNOSTICS_NOTICE_PENDING, false)
     private val configured get() = FirebaseApp.getApps(appContext).isNotEmpty()
 
     fun applyConsent() {
@@ -45,6 +56,9 @@ class AppTelemetry(context: Context) {
         if (withdrawing && configured) FirebaseAnalytics.getInstance(appContext).resetAnalyticsData()
     }
 
+    fun acknowledgeDiagnosticsNotice(): Boolean =
+        preferences.edit().putBoolean(DIAGNOSTICS_NOTICE_PENDING, false).commit()
+
     fun event(name: String, values: Map<String, Any?> = emptyMap()) {
         if (!analyticsEnabled || !configured || name !in EVENTS) return
         val parameters = Bundle()
@@ -59,6 +73,8 @@ class AppTelemetry(context: Context) {
     }
 
     companion object {
+        private const val DIAGNOSTICS_BASELINE = "diagnostics_baseline_initialized"
+        private const val DIAGNOSTICS_NOTICE_PENDING = "diagnostics_notice_pending"
         val EVENTS = setOf("screen_view", "screen_duration", "cutout_started", "cutout_completed", "cutout_failed", "cutout_cancelled", "editor_action", "export_completed", "export_failed", "bubble_changed", "permission_result", "locale_changed")
         val FIELDS = setOf("screen_name", "duration_ms", "source", "surface", "format", "action", "result", "permission", "enabled", "locale", "stage")
     }

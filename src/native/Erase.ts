@@ -8,6 +8,8 @@ export type HomeRow = {
   title: string;
   status: GrantStatus;
   need: PermissionNeed;
+  deniedCount?: number;
+  permanentlyDenied?: boolean;
 };
 
 export type HomeSnapshot = {
@@ -54,12 +56,15 @@ export type MaskResult = {
   message?: string;
 };
 
-export type AppPreferences = { theme: 'system' | 'light' | 'dark'; analytics: boolean; crashes: boolean };
+export type AppPreferences = { theme: 'system' | 'light' | 'dark'; analytics: boolean; crashes: boolean; diagnosticsNoticePending?: boolean };
 
 type EraseNative = {
   getPreferences?(): Promise<AppPreferences>;
   setPreferences?(theme: string, analytics: boolean, crashes: boolean): Promise<void>;
   logProductEvent?(name: string, values: Record<string, string | number | boolean>): Promise<void>;
+  acknowledgeDiagnosticsNotice?(): Promise<void>;
+  beginPermissionRequest?(kind: string): Promise<string>;
+  completePermissionRequest?(kind: string, attemptId: string, blocked: boolean): Promise<void>;
   getHome(): Promise<HomeSnapshot>;
   prepareModel(): Promise<string>;
   setBubble(enabled: boolean): Promise<void>;

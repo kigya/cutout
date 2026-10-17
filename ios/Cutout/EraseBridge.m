@@ -24,6 +24,7 @@ RCT_EXTERN_METHOD(moveBubble:(nonnull NSNumber *)dx dy:(nonnull NSNumber *)dy)
 RCT_EXTERN_METHOD(settleBubble:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(setBubbleSize:(nonnull NSNumber *)width height:(nonnull NSNumber *)height)
 RCT_EXTERN_METHOD(getPreferences:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(acknowledgeDiagnosticsNotice:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(setPreferences:(NSString *)theme analytics:(BOOL)analytics crashes:(BOOL)crashes resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(logProductEvent:(NSString *)name values:(NSDictionary *)values resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 @end

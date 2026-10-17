@@ -4,7 +4,7 @@
 
 Remove a background, refine the edges, and copy a transparent image into your next task.
 
-Cutout processes images on your device with a bundled ISNet model. On Android, an optional floating Bubble brings the same workflow above other apps: choose a picture, remove its background, then copy or save the result.
+Cutout processes images on your device with a bundled ISNet model. On Android, an optional floating Bubble brings the same workflow above other apps: choose a picture, remove its background, then copy or save the result. Successful Bubble actions collapse the panel and leave the translucent shortcut on screen.
 
 ## What you can do
 
@@ -26,7 +26,7 @@ This repository contains development source. Signed store builds are not publish
 
 Images and clipboard content stay on the device. Temporary working images use app-private cache storage; exported files and copied images are created only by your actions.
 
-Optional Firebase usage analytics and crash reporting are off by default and have separate controls. When enabled, they send technical usage or diagnostic information, including SDK identifiers. Images, filenames, paths, and clipboard content are excluded. See [Privacy](PRIVACY.md).
+Firebase usage analytics and crash reporting are enabled by default to help improve Cutout. A notice links to the separate opt-out controls in Settings. While enabled, these services send technical usage or diagnostic information, including SDK identifiers. Images, filenames, paths, and clipboard content are excluded. See the [privacy policy](https://kigya.github.io/cutout/privacy/).
 
 ## Build from source
 

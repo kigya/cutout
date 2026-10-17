@@ -39,8 +39,8 @@ class ApplicationLifecycleTest {
             ReflectionHelpers.setField(application, "injected", true)
             application.applicationInfo.flags = if (debug) application.applicationInfo.flags or ApplicationInfo.FLAG_DEBUGGABLE else application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE.inv()
             application.onCreate()
-            assertFalse(dev.kigya.cutout.data.AppTelemetry(application).analyticsEnabled)
-            assertFalse(dev.kigya.cutout.data.AppTelemetry(application).crashEnabled)
+            assertTrue(dev.kigya.cutout.data.AppTelemetry(application).analyticsEnabled)
+            assertTrue(dev.kigya.cutout.data.AppTelemetry(application).crashEnabled)
             assertSame(host, application.reactHost)
             assertSame(host, application.reactHost)
             verify(exactly = 1) { ReactNativeApplicationEntryPoint.loadReactNative(application) }

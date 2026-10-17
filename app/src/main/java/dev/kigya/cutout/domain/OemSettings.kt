@@ -21,8 +21,8 @@ enum class PermissionNeed {
     Optional,
 }
 
-fun permissionNeed(kind: PermissionKind): PermissionNeed =
-    if (kind == PermissionKind.Overlay) PermissionNeed.RequiredForBubble else PermissionNeed.Optional
+fun permissionNeed(kind: PermissionKind, bubbleEnabled: Boolean = false): PermissionNeed =
+    if (kind == PermissionKind.Overlay && bubbleEnabled) PermissionNeed.RequiredForBubble else PermissionNeed.Optional
 
 fun blocksInAppCutout(@Suppress("UNUSED_PARAMETER") kind: PermissionKind): Boolean = false
 

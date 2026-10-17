@@ -26,6 +26,7 @@ class MainActivity : ReactActivity() {
         installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        window.setBackgroundDrawableResource(R.color.splash_background)
         applySystemBarAppearance()
         emitEdit(intent)
     }

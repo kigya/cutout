@@ -39,21 +39,30 @@ class PlatformControlsTest {
     @Before fun rememberBuildIdentity() {
         manufacturer = Build.MANUFACTURER
         brand = Build.BRAND
+        app.getSharedPreferences("cutout_preferences", Context.MODE_PRIVATE).edit().clear().commit()
     }
     @After fun restoreBuildIdentity() {
         ReflectionHelpers.setStaticField(Build::class.java, "MANUFACTURER", manufacturer)
         ReflectionHelpers.setStaticField(Build::class.java, "BRAND", brand)
     }
-    @Test fun `optional diagnostics default off and theme is validated without Firebase configuration`() {
+    @Test fun `diagnostics baseline is enabled once and theme is validated without Firebase configuration`() {
         val telemetry = AppTelemetry(app)
-        assertFalse(telemetry.analyticsEnabled)
-        assertFalse(telemetry.crashEnabled)
+        assertTrue(telemetry.analyticsEnabled)
+        assertTrue(telemetry.crashEnabled)
+        assertTrue(telemetry.diagnosticsNoticePending)
         assertEquals("system", telemetry.theme)
         telemetry.event("cutout_completed", mapOf("source" to "clipboard"))
         telemetry.update("dark", true, true)
         assertEquals("dark", AppTelemetry(app).theme)
         assertTrue(telemetry.analyticsEnabled)
         assertTrue(telemetry.crashEnabled)
+        telemetry.update("dark", false, false)
+        val optedOut = AppTelemetry(app)
+        assertFalse(optedOut.analyticsEnabled)
+        assertFalse(optedOut.crashEnabled)
+        assertTrue(optedOut.diagnosticsNoticePending)
+        optedOut.acknowledgeDiagnosticsNotice()
+        assertFalse(AppTelemetry(app).diagnosticsNoticePending)
         telemetry.event("not_allowed", mapOf("path" to "/private/photo.png"))
         telemetry.update("invalid", false, false)
         assertEquals("system", telemetry.theme)

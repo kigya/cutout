@@ -196,9 +196,11 @@ class EraseModuleTest {
 
     private fun fixture(): Fixture {
         val context = TestReactContext(RuntimeEnvironment.getApplication())
+        context.getSharedPreferences("cutout_permission_history", android.content.Context.MODE_PRIVATE).edit().clear().commit()
         val permissions = mockk<PermissionCenter>(relaxed = true)
         val preferences = mockk<BubblePreferences>()
         val navigator = mockk<SettingsNavigator>(relaxed = true)
+        every { navigator.open(any()) } returns true
         val bubble = mockk<BubbleStarter>(relaxed = true)
         val presenter = mockk<BubblePresenter>()
         val state = MutableStateFlow(BubbleUiState())
@@ -262,7 +264,9 @@ class EraseModuleTest {
         val first = rows.getMap(0)!!
         assertEquals("overlay", first.string("kind"))
         assertEquals("denied", first.string("status"))
-        assertEquals("requiredForBubble", first.string("need"))
+        assertEquals("optional", first.string("need"))
+        assertEquals(0, first.getInt("deniedCount"))
+        assertFalse(first.getBoolean("permanentlyDenied"))
         assertFalse(first.string("title").isNullOrBlank())
 
         every { f.permissions.family() } returns OemFamily.Generic
@@ -278,7 +282,7 @@ class EraseModuleTest {
     fun `home synchronizes an enabled overlay and reports a readable clipboard`() = runTest {
         val f = fixture()
         every { f.preferences.enabled } returns MutableStateFlow(true)
-        every { f.permissions.snapshot() } returns emptyList()
+        every { f.permissions.snapshot() } returns listOf(PermissionSnapshot(PermissionKind.Overlay, GrantStatus.Granted))
         every { f.permissions.family() } returns OemFamily.Generic
         every { f.images.hasPicture() } returns true
         org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
@@ -289,6 +293,8 @@ class EraseModuleTest {
 
             assertTrue(home.getBoolean("bubbleEnabled"))
             assertTrue(home.getBoolean("clipboardReady"))
+            val overlay = home.getArray("rows")!!.getMap(0)!!
+            assertEquals("requiredForBubble", overlay.string("need"))
             coVerify(exactly = 1) { f.bubble.start() }
             coVerify(exactly = 0) { f.bubble.stop() }
         } finally {
@@ -926,7 +932,7 @@ class EraseModuleTest {
     }
 
     @Test
-    fun `bridge exposes its registered name and accepts product event calls with analytics disabled`() = runTest {
+    fun `bridge exposes its registered name and reports initial diagnostics baseline`() = runTest {
         val f = fixture()
         assertEquals(EraseModule.NAME, f.module.name)
 
@@ -940,7 +946,10 @@ class EraseModuleTest {
         assertNull(promise.value())
         val preferences = PromiseResult()
         f.module.getPreferences(preferences)
-        assertFalse((preferences.value() as WritableMap).getBoolean("analytics"))
+        val prefs = preferences.value() as WritableMap
+        assertTrue(prefs.getBoolean("analytics"))
+        assertTrue(prefs.getBoolean("crashes"))
+        assertTrue(prefs.getBoolean("diagnosticsNoticePending"))
     }
 
     @Test
@@ -1247,7 +1256,7 @@ class EraseModuleTest {
             val event = firstArg<BubbleUiEvent>()
             f.state.value = f.state.value.copy(
                 revision = f.state.value.revision + 1,
-                expanded = event != BubbleUiEvent.Dismiss,
+                expanded = event !in setOf(BubbleUiEvent.Dismiss, BubbleUiEvent.Collapse),
                 phase = if (event in setOf(BubbleUiEvent.FromClipboard, BubbleUiEvent.FromGallery, BubbleUiEvent.FromFile)) {
                     BubblePhase.Copied
                 } else {
@@ -1255,12 +1264,13 @@ class EraseModuleTest {
                 },
             )
         }
-        listOf("clipboard", "gallery", "file", "refine", "dismiss", "again").forEach { action ->
+        listOf("clipboard", "gallery", "file", "refine", "dismiss", "collapse", "again").forEach { action ->
+            f.state.value = f.state.value.copy(expanded = true)
             val result = PromiseResult()
             f.module.bubbleAction(action, result)
             val state = result.value() as WritableMap
             assertTrue("$action must advance the public state revision", state.getInt("revision") > 0)
-            assertEquals(action != "dismiss", state.getBoolean("expanded"))
+            assertEquals(action !in listOf("dismiss", "collapse"), state.getBoolean("expanded"))
             if (action in listOf("clipboard", "gallery", "file")) assertEquals("copied", state.string("phase"))
         }
         coVerify(exactly = 1) { f.presenter.onEvent(BubbleUiEvent.FromClipboard) }
@@ -1268,7 +1278,74 @@ class EraseModuleTest {
         coVerify(exactly = 1) { f.presenter.onEvent(BubbleUiEvent.FromFile) }
         coVerify(exactly = 1) { f.presenter.onEvent(BubbleUiEvent.Refine) }
         coVerify(exactly = 1) { f.presenter.onEvent(BubbleUiEvent.Dismiss) }
+        coVerify(exactly = 1) { f.presenter.onEvent(BubbleUiEvent.Collapse) }
         coVerify(exactly = 1) { f.presenter.onEvent(BubbleUiEvent.Again) }
+    }
+
+    @Test
+    fun `collapse on an already collapsed bubble resolves without waiting or changing the result`() = runTest {
+        val f = fixture()
+        f.state.value = BubbleUiState(
+            revision = 7,
+            expanded = false,
+            phase = BubblePhase.Copied,
+            message = Messages.COPIED,
+            previewPath = "/cache/result.png",
+            percent = 100,
+        )
+        val promise = PromiseResult()
+        f.module.bubbleAction("collapse", promise)
+
+        val snapshot = promise.value() as WritableMap
+        assertEquals(7, snapshot.getInt("revision"))
+        assertFalse(snapshot.getBoolean("expanded"))
+        assertEquals("copied", snapshot.string("phase"))
+        assertEquals(Messages.COPIED, snapshot.string("message"))
+        assertEquals("/cache/result.png", snapshot.string("previewPath"))
+        assertEquals(100, snapshot.getInt("percent"))
+        coVerify(exactly = 0) { f.presenter.onEvent(any()) }
+    }
+
+    @Test
+    fun `permission completion records a live denial once and ignores unknown status`() = runTest {
+        val f = fixture()
+        every { f.permissions.family() } returns OemFamily.Generic
+        every { f.permissions.snapshot() } returns listOf(
+            PermissionSnapshot(PermissionKind.Overlay, GrantStatus.Denied),
+        )
+        val begin = PromiseResult()
+        f.module.beginPermissionRequest("overlay", begin)
+        val attempt = begin.value() as String
+
+        val complete = PromiseResult()
+        f.module.completePermissionRequest("overlay", attempt, true, complete)
+        complete.value()
+        val repeated = PromiseResult()
+        f.module.completePermissionRequest("overlay", attempt, true, repeated)
+        repeated.value()
+
+        val home = PromiseResult()
+        f.module.getHome(home)
+        val row = (home.value() as WritableMap).getArray("rows")!!.getMap(0)!!
+        assertEquals(1, row.getInt("deniedCount"))
+        assertTrue(row.getBoolean("permanentlyDenied"))
+        assertEquals("optional", row.string("need"))
+
+        every { f.permissions.snapshot() } returns listOf(
+            PermissionSnapshot(PermissionKind.Overlay, GrantStatus.Unknown),
+        )
+        val unknownBegin = PromiseResult()
+        f.module.beginPermissionRequest("overlay", unknownBegin)
+        val unknownAttempt = unknownBegin.value() as String
+        val unknownComplete = PromiseResult()
+        f.module.completePermissionRequest("overlay", unknownAttempt, true, unknownComplete)
+        unknownComplete.value()
+        val unknownHome = PromiseResult()
+        f.module.getHome(unknownHome)
+        val unknownRow = (unknownHome.value() as WritableMap).getArray("rows")!!.getMap(0)!!
+        assertEquals(1, unknownRow.getInt("deniedCount"))
+        assertFalse(unknownRow.getBoolean("permanentlyDenied"))
+        assertEquals("unknown", unknownRow.string("status"))
     }
 
     @Test
@@ -1363,8 +1440,9 @@ class EraseModuleTest {
         f.module.getPreferences(defaultPreferences)
         val defaults = defaultPreferences.value() as WritableMap
         assertEquals("system", defaults.string("theme"))
-        assertFalse(defaults.getBoolean("analytics"))
-        assertFalse(defaults.getBoolean("crashes"))
+        assertTrue(defaults.getBoolean("analytics"))
+        assertTrue(defaults.getBoolean("crashes"))
+        assertTrue(defaults.getBoolean("diagnosticsNoticePending"))
 
         val changed = PromiseResult()
         f.module.setPreferences("garish", analytics = true, crashes = false, promise = changed)
@@ -1374,6 +1452,18 @@ class EraseModuleTest {
         val updated = updatedPreferences.value() as WritableMap
         assertEquals("system", updated.string("theme"))
         assertTrue(updated.getBoolean("analytics"))
+        assertFalse(updated.getBoolean("crashes"))
+        assertTrue(updated.getBoolean("diagnosticsNoticePending"))
+
+        val acknowledged = PromiseResult()
+        f.module.acknowledgeDiagnosticsNotice(acknowledged)
+        assertNull(acknowledged.value())
+        val afterAcknowledgement = PromiseResult()
+        f.module.getPreferences(afterAcknowledgement)
+        val finalPreferences = afterAcknowledgement.value() as WritableMap
+        assertFalse(finalPreferences.getBoolean("diagnosticsNoticePending"))
+        assertTrue(finalPreferences.getBoolean("analytics"))
+        assertFalse(finalPreferences.getBoolean("crashes"))
 
         val localeBefore = PromiseResult()
         f.module.getLocale(localeBefore)

@@ -17,6 +17,9 @@ import FirebaseRemoteConfig
 
 @objc(Erase)
 final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocumentPickerDelegate, WKNavigationDelegate {
+  var appSettingsOpener: (URL, @escaping (Bool) -> Void) -> Void = { url, completion in
+    UIApplication.shared.open(url, options: [:], completionHandler: completion)
+  }
   private var pickerResolve: RCTPromiseResolveBlock?
   private var pickerControllers: [ObjectIdentifier: UUID] = [:]
   private let pickerLock = NSLock()
@@ -25,6 +28,16 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
   private var pickerLoadTimeout: DispatchWorkItem?
   private var ortEnv: ORTEnv?
   private var ortSession: ORTSession?
+  var modelURLProvider: () -> URL? = { Bundle.main.url(forResource: "isnet", withExtension: "onnx") }
+  var photoAuthorizationStatusProvider: () -> PHAuthorizationStatus = { PHPhotoLibrary.authorizationStatus(for: .addOnly) }
+  var photoAuthorizationRequester: (@escaping (PHAuthorizationStatus) -> Void) -> Void = { completion in
+    PHPhotoLibrary.requestAuthorization(for: .addOnly, handler: completion)
+  }
+  var photoAssetSaver: (UIImage, @escaping (Bool) -> Void) -> Void = { image, completion in
+    PHPhotoLibrary.shared().performChanges({ PHAssetChangeRequest.creationRequestForAsset(from: image) }, completionHandler: { saved, _ in
+      completion(saved)
+    })
+  }
   private let modelQueue = DispatchQueue(label: "dev.kigya.cutout.isnet", qos: .userInitiated)
   private let processingQueue = DispatchQueue(label: "dev.kigya.cutout.processing", qos: .userInitiated)
   private var pendingEdit: [String: Any]?
@@ -38,6 +51,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
   override func supportedEvents() -> [String]! { ["eraseLocale", "eraseProgress", "erasePreview"] }
 
   static func bootstrapTelemetry() {
+    DiagnosticsConsentBaseline.applyIfNeeded()
     #if canImport(FirebaseCore) && canImport(FirebaseAnalytics) && canImport(FirebaseCrashlytics) && canImport(FirebaseRemoteConfig)
     guard Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist") != nil else { return }
     if FirebaseApp.app() == nil { FirebaseApp.configure() }
@@ -98,7 +112,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
 
   private func prepareModelIfNeeded() throws {
     guard ortSession == nil else { return }
-    guard let modelURL = Bundle.main.url(forResource: "isnet", withExtension: "onnx") else {
+    guard let modelURL = modelURLProvider() else {
       throw NSError(domain: "Erase", code: 1, userInfo: [NSLocalizedDescriptionKey: "model_missing"])
     }
     let env = try ORTEnv(loggingLevel: ORTLoggingLevel.warning)
@@ -117,16 +131,25 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
   func hideBubble(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) { resolve(nil) }
 
   @objc(openPermission:resolver:rejecter:)
-  func openPermission(_ kind: String, resolver resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) { resolve(nil) }
+  func openPermission(_ kind: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
+    guard kind == "photos", let settingsURL = URL(string: UIApplication.openSettingsURLString) else {
+      resolve(nil)
+      return
+    }
+    DispatchQueue.main.async {
+      self.appSettingsOpener(settingsURL) { opened in
+        if opened { resolve(nil) }
+        else { self.reject(reject, "settings_unavailable") }
+      }
+    }
+  }
 
   @objc(pickAndCut:resolver:rejecter:)
   func pickAndCut(_ mode: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-    pickerLock.lock()
-    guard pickerRequestID == nil else { pickerLock.unlock(); resolve(["status": "failed", "message": "busy"]); return }
-    let requestID = UUID()
-    pickerRequestID = requestID
-    pickerResolve = resolve
-    pickerLock.unlock()
+    guard let requestID = reservePickerRequest(resolve: resolve) else {
+      resolve(["status": "failed", "message": "busy"])
+      return
+    }
 
     DispatchQueue.main.async {
       guard let presenter = self.topViewController() else {
@@ -148,6 +171,18 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
         presenter.present(picker, animated: true)
       }
     }
+  }
+
+  // Keeps request ownership and resolver assignment atomic; internal access lets lifecycle
+  // tests cover timeout/cancel completion without presenting system picker UI.
+  func reservePickerRequest(resolve: @escaping RCTPromiseResolveBlock) -> UUID? {
+    pickerLock.lock()
+    guard pickerRequestID == nil else { pickerLock.unlock(); return nil }
+    let requestID = UUID()
+    pickerRequestID = requestID
+    pickerResolve = resolve
+    pickerLock.unlock()
+    return requestID
   }
 
   @objc(cutClipboard:rejecter:)
@@ -296,14 +331,14 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
 
   @objc(saveToGallery:resolver:rejecter:)
   func saveToGallery(_ path: String, resolver resolve: @escaping RCTPromiseResolveBlock, rejecter reject: @escaping RCTPromiseRejectBlock) {
-    let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+    let status = photoAuthorizationStatusProvider()
     let save: () -> Void = {
       guard let image = UIImage(contentsOfFile: path) else {
         self.recordProductEvent(name: "export_failed", values: ["action": "save", "format": "png"] as NSDictionary)
         resolve("failed")
         return
       }
-      PHPhotoLibrary.shared().performChanges({ PHAssetChangeRequest.creationRequestForAsset(from: image) }) { ok, _ in
+      self.photoAssetSaver(image) { ok in
         DispatchQueue.main.async {
           self.recordProductEvent(name: ok ? "export_completed" : "export_failed",
                                   values: ["action": "save", "format": "png"] as NSDictionary)
@@ -312,17 +347,12 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
         }
       }
     }
-    switch PhotoAddAuthorizationPolicy.disposition(for: status) {
-    case .save:
-      save()
-    case .deny:
-      resolve("denied")
-    case .request:
-      PHPhotoLibrary.requestAuthorization(for: .addOnly) { result in
+    PhotoAddAuthorizationPolicy.perform(for: status, save: save, request: {
+      self.photoAuthorizationRequester { result in
         self.recordProductEvent(name: "permission_result", values: ["permission": "photos_add", "result": result == .authorized ? "granted" : "denied"] as NSDictionary)
         DispatchQueue.main.async { result == .authorized ? save() : resolve("denied") }
       }
-    }
+    }, deny: { resolve("denied") })
   }
 
   @objc(getLocale:rejecter:)
@@ -336,7 +366,14 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     let defaults = UserDefaults.standard
     resolve(["theme": defaults.string(forKey: "erase.theme") ?? "system",
              "analytics": defaults.bool(forKey: "erase.analytics"),
-             "crashes": defaults.bool(forKey: "erase.crashes")])
+             "crashes": defaults.bool(forKey: "erase.crashes"),
+             "diagnosticsNoticePending": !defaults.bool(forKey: DiagnosticsConsentBaseline.noticeAcknowledgedKey)])
+  }
+
+  @objc(acknowledgeDiagnosticsNotice:rejecter:)
+  func acknowledgeDiagnosticsNotice(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
+    UserDefaults.standard.set(true, forKey: DiagnosticsConsentBaseline.noticeAcknowledgedKey)
+    resolve(nil)
   }
 
   @objc(setPreferences:analytics:crashes:resolver:rejecter:)
@@ -417,20 +454,24 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     emitProgress(8)
     armPickerLoadTimeout(requestID)
     provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, error in
-      // Ignore late callbacks after timeout or user cancellation; in particular, never copy a
-      // cutout produced by a request whose promise has already completed.
-      guard self.clearPickerLoadTimeout(requestID) else { return }
-      guard let data, error == nil, data.count <= 32 * 1024 * 1024,
-            let image = self.downsampledImage(data) else {
-        self.completePicker(["status": "failed", "message": "read_failed"], requestID: requestID)
-        return
-      }
-      self.process(image: image, rasterizedSvg: false, pickerRequestID: requestID,
-                   resolve: { self.completePicker($0 ?? NSNull(), requestID: requestID) },
-                   reject: { _, message, _ in
-                     self.completePicker(["status": "failed", "message": message ?? "read_failed"] as [String: Any], requestID: requestID)
-                   })
+      self.finishPhotoProviderLoad(data, error: error, requestID: requestID)
     }
+  }
+
+  // Internal to let XCTest exercise provider failures without constructing Photos-owned result objects.
+  func finishPhotoProviderLoad(_ data: Data?, error: Error?, requestID: UUID) {
+    // Ignore late callbacks after timeout or user cancellation; never publish output for a settled request.
+    guard clearPickerLoadTimeout(requestID) else { return }
+    guard let data, error == nil, data.count <= 32 * 1024 * 1024,
+          let image = downsampledImage(data) else {
+      completePicker(["status": "failed", "message": "read_failed"], requestID: requestID)
+      return
+    }
+    process(image: image, rasterizedSvg: false, pickerRequestID: requestID,
+            resolve: { self.completePicker($0 ?? NSNull(), requestID: requestID) },
+            reject: { _, message, _ in
+              self.completePicker(["status": "failed", "message": message ?? "read_failed"] as [String: Any], requestID: requestID)
+            })
   }
 
   func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
@@ -477,7 +518,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     }
   }
 
-  private func associatePickerController(_ controller: UIViewController, requestID: UUID) -> Bool {
+  func associatePickerController(_ controller: UIViewController, requestID: UUID) -> Bool {
     pickerLock.lock(); defer { pickerLock.unlock() }
     guard pickerRequestID == requestID else { return false }
     pickerControllers[ObjectIdentifier(controller)] = requestID
@@ -489,7 +530,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     return pickerControllers.removeValue(forKey: ObjectIdentifier(controller))
   }
 
-  private func armPickerLoadTimeout(_ requestID: UUID) {
+  func armPickerLoadTimeout(_ requestID: UUID, delay: TimeInterval = 45) {
     let timeout = DispatchWorkItem { [weak self] in
       self?.completePicker(["status": "failed", "message": "read_failed"], requestID: requestID, onlyIfAwaitingData: true)
     }
@@ -499,7 +540,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     pickerAwaitingData = true
     pickerLoadTimeout = timeout
     pickerLock.unlock()
-    DispatchQueue.main.asyncAfter(deadline: .now() + 45, execute: timeout)
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: timeout)
   }
 
   private func clearPickerLoadTimeout(_ requestID: UUID) -> Bool {
@@ -583,7 +624,9 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     }
   }
 
-  private func processSVG(_ text: String, pickerRequestID requestID: UUID? = nil, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+  // Internal (rather than private) so the native test target can exercise vector imports
+  // without going through the system pasteboard permission prompt.
+  func processSVG(_ text: String, pickerRequestID requestID: UUID? = nil, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
     guard let data = text.data(using: .utf8), text.lowercased().contains("<svg") else {
       resolve(["status": "failed", "message": "read_failed"]); return
     }
@@ -736,7 +779,8 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     return UIImage(cgImage: outputCG)
   }
 
-  private func normalized(_ image: UIImage) -> UIImage {
+  // Internal so the size/orientation safety contract can be verified without invoking ISNet.
+  func normalized(_ image: UIImage) -> UIImage {
     guard let cg = image.cgImage else { return image }
     let swapsAxes = [.left, .leftMirrored, .right, .rightMirrored].contains(image.imageOrientation)
     let sourceWidth = swapsAxes ? cg.height : cg.width
@@ -752,7 +796,8 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     return renderer.image { _ in oriented.draw(in: CGRect(origin: .zero, size: size)) }
   }
 
-  private func downsampledImage(_ data: Data) -> UIImage? {
+  // Internal so bounded image decoding can be tested without loading ISNet.
+  func downsampledImage(_ data: Data) -> UIImage? {
     guard data.count <= 32 * 1024 * 1024,
           let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
           let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -772,7 +817,8 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     return ctx.makeImage()
   }
 
-  private func cropAlpha(_ image: UIImage) -> UIImage? {
+  // Internal so alpha-bound cropping can be tested without loading ISNet.
+  func cropAlpha(_ image: UIImage) -> UIImage? {
     guard let cg = image.cgImage else { return nil }
     let w = cg.width, h = cg.height
     var rgba = [UInt8](repeating: 0, count: w * h * 4)
@@ -889,6 +935,21 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
   }
 }
 
+enum DiagnosticsConsentBaseline {
+  static let baselineVersionKey = "erase.diagnosticsBaselineVersion"
+  static let noticeAcknowledgedKey = "erase.diagnosticsNoticeAcknowledged"
+  static let version = 1
+
+  @discardableResult
+  static func applyIfNeeded(defaults: UserDefaults = .standard) -> Bool {
+    guard defaults.integer(forKey: baselineVersionKey) < version else { return false }
+    defaults.set(true, forKey: "erase.analytics")
+    defaults.set(true, forKey: "erase.crashes")
+    defaults.set(version, forKey: baselineVersionKey)
+    return true
+  }
+}
+
 enum PhotoAddAuthorizationPolicy {
   enum Disposition: Equatable { case save, request, deny }
 
@@ -898,6 +959,14 @@ enum PhotoAddAuthorizationPolicy {
     case .notDetermined: return .request
     case .denied, .restricted: return .deny
     @unknown default: return .deny
+    }
+  }
+
+  static func perform(for status: PHAuthorizationStatus, save: () -> Void, request: () -> Void, deny: () -> Void) {
+    switch disposition(for: status) {
+    case .save: save()
+    case .request: request()
+    case .deny: deny()
     }
   }
 }

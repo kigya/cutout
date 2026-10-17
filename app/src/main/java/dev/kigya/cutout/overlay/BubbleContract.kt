@@ -29,6 +29,7 @@ sealed interface BubbleUiEvent {
     data object FromGallery : BubbleUiEvent
     data object FromFile : BubbleUiEvent
     data object Dismiss : BubbleUiEvent
+    data object Collapse : BubbleUiEvent
     data object Refine : BubbleUiEvent
     data object Again : BubbleUiEvent
 }

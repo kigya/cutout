@@ -11,6 +11,9 @@ import com.facebook.react.bridge.ReactContext
 import dev.kigya.cutout.bridge.EraseEntryPoint
 import dev.kigya.cutout.bridge.EraseModule
 import dev.kigya.cutout.bridge.ErasePackage
+import dev.kigya.cutout.data.BubblePreferences
+import dev.kigya.cutout.overlay.BubblePresenter
+import dev.kigya.cutout.overlay.BubbleUiState
 import com.facebook.react.bridge.ReactApplicationContext
 import dagger.hilt.android.EntryPointAccessors
 import io.mockk.every
@@ -27,6 +30,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.util.ReflectionHelpers
+import kotlinx.coroutines.flow.MutableStateFlow
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
@@ -37,6 +41,12 @@ class AppWiringTest {
         val context = mockk<ReactApplicationContext>(relaxed = true)
         every { context.applicationContext } returns app
         val entry = mockk<EraseEntryPoint>(relaxed = true)
+        val presenter = mockk<BubblePresenter>()
+        every { presenter.state } returns MutableStateFlow(BubbleUiState())
+        every { entry.presenter() } returns presenter
+        val preferences = mockk<BubblePreferences>()
+        every { preferences.enabled } returns MutableStateFlow(false)
+        every { entry.preferences() } returns preferences
         mockkStatic(EntryPointAccessors::class)
         every { EntryPointAccessors.fromApplication(app, EraseEntryPoint::class.java) } returns entry
         val packageInfo = ErasePackage()

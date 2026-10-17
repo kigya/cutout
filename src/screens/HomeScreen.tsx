@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Modal, PermissionsAndroid, Platform, Pressable, Switch, Text, View } from 'react-native';
 import { Badge } from '../components/ui/badge';
 import { BubbleDemo } from '../components/BubbleDemo';
@@ -11,7 +11,7 @@ import { bubbleEnabledAfter } from '../logic/bubble';
 import { canUseClipboard } from '../logic/clipboard';
 import { SYSTEM_BAR_GAP, useSystemBars } from '../logic/systemBars';
 import { permissionCopy } from '../logic/permissionCopy';
-import type { PermissionKind } from '../logic/permissions';
+import { permissionNeed, permissionNeedsHelp, type PermissionKind } from '../logic/permissions';
 import { Erase, type HomeSnapshot } from '../native/Erase';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -21,71 +21,198 @@ type Props = {
   home: HomeSnapshot;
   busy: boolean;
   notice: string;
+  diagnosticsNoticePending?: boolean;
+  onDismissDiagnosticsNotice?: () => void;
+  onPrivacy?: () => void;
   onRefresh: () => void;
   onSettings: () => void;
   onCut: (source: Source) => void;
 };
 
-export function HomeScreen({ home, busy, notice, onRefresh, onSettings, onCut }: Props) {
+type PermissionSheetState = { kind: PermissionKind; blocked: boolean; enableBubble: boolean; setup?: boolean };
+
+type SettingsAttempt = {
+  kind: PermissionKind;
+  enableBubble: boolean;
+  launched: boolean;
+  sawBackground: boolean;
+  historyReady: boolean;
+  attemptId?: string;
+};
+
+export function HomeScreen({ home, busy, notice, diagnosticsNoticePending = false, onDismissDiagnosticsNotice, onPrivacy, onRefresh, onSettings, onCut }: Props) {
   const { t } = useLocale();
   const { colors } = useTheme();
   const insets = useSystemBars();
-  const [sheet, setSheet] = useState<PermissionKind | null>(null);
+  const [sheet, setSheet] = useState<PermissionSheetState | null>(null);
   const [sources, setSources] = useState(false);
   const pendingSource = useRef<Source | null>(null);
-  const [overlayInfo, setOverlayInfo] = useState(false);
   const [pendingEnable, setPendingEnable] = useState(false);
+  const pendingEnableRef = useRef(false);
+  const settingsAttemptRef = useRef<SettingsAttempt | null>(null);
+  const runtimeRequestRef = useRef(false);
   const [showBubbleDemo, setShowBubbleDemo] = useState(true);
   const [bubbleNotice, setBubbleNotice] = useState('');
-  const detail = sheet ? permissionCopy(sheet) : null;
-  const detailBody = sheet === 'notifications' ? t('notificationWhy') : detail ? t(detail.body) : '';
+  const latestHomeRef = useRef(home);
+  latestHomeRef.current = home;
+  const detail = sheet ? permissionCopy(sheet.kind) : null;
+  const detailBody = sheet?.blocked
+    ? t('permissionBlockedBody')
+    : sheet?.kind === 'notifications'
+      ? t('notificationWhy')
+      : detail ? t(detail.body) : '';
+  const detailTitle = sheet?.blocked ? t('permissionBlockedTitle') : detail ? t(detail.title) : '';
   const statusLabel = {
     granted: t('statusOn'),
     denied: t('statusOff'),
     unknown: t('statusUnknown'),
   } as const;
 
-  async function enableBubble() {
-    setOverlayInfo(false);
-    const overlay = home.rows.find(row => row.kind === 'overlay');
-    try {
-      if (overlay?.status === 'granted') {
-        await Erase.setBubble(true);
-        onRefresh();
-        return;
+  function updatePendingEnable(value: boolean) {
+    pendingEnableRef.current = value;
+    setPendingEnable(value);
+  }
+
+  const finishSettingsAttempt = useCallback(async (attempt: SettingsAttempt) => {
+    if (settingsAttemptRef.current !== attempt) return;
+    settingsAttemptRef.current = null;
+
+    if (attempt.attemptId) {
+      await Erase.completePermissionRequest?.(attempt.kind, attempt.attemptId, false).catch(() => undefined);
+    }
+    const snapshot = await Erase.getHome().catch(() => null);
+    const row = snapshot?.rows.find(candidate => candidate.kind === attempt.kind);
+    if (attempt.enableBubble) {
+      updatePendingEnable(false);
+      if (row?.status === 'granted') {
+        await Erase.setBubble(true).catch(() => setBubbleNotice(t('readFailed')));
+      } else if (row && permissionNeedsHelp(row)) {
+        setSheet({ kind: attempt.kind, blocked: true, enableBubble: true });
       }
-      setPendingEnable(true);
-      await Erase.openPermission('overlay');
+    } else if (row && permissionNeedsHelp(row)) {
+      setSheet({ kind: attempt.kind, blocked: true, enableBubble: false });
+    }
+    onRefresh();
+  }, [onRefresh, t]);
+
+  const openPermissionSettings = useCallback(async (kind: PermissionKind, enableAfterGrant: boolean) => {
+    if (settingsAttemptRef.current) return;
+    const attempt: SettingsAttempt = {
+      kind,
+      enableBubble: enableAfterGrant,
+      launched: false,
+      sawBackground: false,
+      historyReady: false,
+    };
+    settingsAttemptRef.current = attempt;
+    if (enableAfterGrant) updatePendingEnable(true);
+
+    try {
+      await Erase.openPermission(kind);
+      attempt.launched = true;
+      attempt.attemptId = await Erase.beginPermissionRequest?.(kind).catch(() => undefined);
+      attempt.historyReady = true;
+      if (attempt.sawBackground && AppState.currentState === 'active') {
+        await finishSettingsAttempt(attempt);
+      }
     } catch {
-      setPendingEnable(false);
+      if (settingsAttemptRef.current === attempt) settingsAttemptRef.current = null;
+      if (enableAfterGrant) updatePendingEnable(false);
       setBubbleNotice(t('readFailed'));
       onRefresh();
     }
-  }
+  }, [finishSettingsAttempt, onRefresh, t]);
 
-  async function toggleBubble(next: boolean) {
-    if (next && home.rows.find(row => row.kind === 'overlay')?.status !== 'granted') {
-      setOverlayInfo(true);
+  const enableBubble = useCallback(async () => {
+    const latestHome = latestHomeRef.current;
+    const overlay = latestHome.rows.find(row => row.kind === 'overlay');
+    if (overlay?.status === 'granted') {
+      await Erase.setBubble(true);
+      onRefresh();
+      return;
+    }
+    updatePendingEnable(true);
+    if (overlay && permissionNeedsHelp(overlay)) {
+      setSheet({ kind: 'overlay', blocked: true, enableBubble: true });
+    } else {
+      setSheet({ kind: 'overlay', blocked: false, enableBubble: true, setup: true });
+    }
+  }, [onRefresh]);
+
+  const toggleBubble = useCallback(async (next: boolean) => {
+    if (next) {
+      await enableBubble();
       return;
     }
     await Erase.setBubble(bubbleEnabledAfter('set', next));
+    updatePendingEnable(false);
     onRefresh();
-  }
+  }, [enableBubble, onRefresh]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', async state => {
-      if (state !== 'active') return;
-      onRefresh();
-      if (!pendingEnable) return;
-      const snapshot = await Erase.getHome().catch(() => null);
-      setPendingEnable(false);
-      if (snapshot?.rows.find(row => row.kind === 'overlay')?.status === 'granted') {
-        await Erase.setBubble(true).catch(() => setBubbleNotice(t('readFailed')));
+      const attempt = settingsAttemptRef.current;
+      if (state !== 'active') {
+        if (attempt) attempt.sawBackground = true;
+        return;
       }
       onRefresh();
+      if (attempt?.launched && attempt.historyReady && attempt.sawBackground) {
+        await finishSettingsAttempt(attempt);
+      }
     });
     return () => subscription.remove();
-  }, [onRefresh, pendingEnable]);
+  }, [finishSettingsAttempt, onRefresh]);
+
+  const requestNotifications = useCallback(async () => {
+    if (runtimeRequestRef.current) return;
+    runtimeRequestRef.current = true;
+    let attemptId: string | undefined;
+    try {
+      attemptId = await Erase.beginPermissionRequest?.('notifications').catch(() => undefined);
+      const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+      if (attemptId) {
+        await Erase.completePermissionRequest?.(
+          'notifications',
+          attemptId,
+          result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN,
+        ).catch(() => undefined);
+      }
+      const snapshot = await Erase.getHome().catch(() => null);
+      const row = snapshot?.rows.find(candidate => candidate.kind === 'notifications');
+      if (row && permissionNeedsHelp(row)) {
+        setSheet({ kind: 'notifications', blocked: true, enableBubble: false });
+      }
+      onRefresh();
+    } catch {
+      setBubbleNotice(t('readFailed'));
+      onRefresh();
+    } finally {
+      runtimeRequestRef.current = false;
+    }
+  }, [onRefresh, t]);
+
+  const openRow = useCallback((kind: PermissionKind) => {
+    const latestHome = latestHomeRef.current;
+    const row = latestHome.rows.find(candidate => candidate.kind === kind);
+    if (!row) return;
+    if (permissionNeedsHelp(row)) {
+      setSheet({ kind: row.kind, blocked: true, enableBubble: row.kind === 'overlay' && latestHome.bubbleEnabled });
+      return;
+    }
+    if (row.kind === 'notifications' && Platform.OS === 'android' && Platform.Version >= 33 && row.status !== 'granted') {
+      void requestNotifications();
+      return;
+    }
+    void openPermissionSettings(row.kind, row.kind === 'overlay' && latestHome.bubbleEnabled);
+  }, [openPermissionSettings, requestNotifications]);
+
+  const openRowInfo = useCallback((kind: PermissionKind) => {
+    const latestHome = latestHomeRef.current;
+    const row = latestHome.rows.find(candidate => candidate.kind === kind);
+    if (!row) return;
+    setSheet({ kind: row.kind, blocked: permissionNeedsHelp(row), enableBubble: row.kind === 'overlay' && (latestHome.bubbleEnabled || pendingEnableRef.current) });
+  }, []);
 
   function closeSources() {
     pendingSource.current = null;
@@ -118,6 +245,17 @@ export function HomeScreen({ home, busy, notice, onRefresh, onSettings, onCut }:
         </Pressable>
       </View>
       <Text className="mt-3 text-base leading-6" style={{ color: colors.textMuted }}>{t('localProcessing')}</Text>
+      {diagnosticsNoticePending ? (
+        <View className="mt-4 rounded-3xl border p-4" style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
+          <Text accessibilityRole="header" className="text-base font-semibold" style={{ color: colors.text }}>{t('diagnosticsNoticeTitle')}</Text>
+          <Text className="mt-2 text-sm leading-5" style={{ color: colors.textMuted }}>{t('diagnosticsNoticeBody')}</Text>
+          <View className="mt-3 gap-2">
+            <Button label={t('diagnosticsNoticeSettings')} tone="ghost" onPress={onSettings} />
+            {onPrivacy ? <Button label={t('privacyPolicy')} tone="ghost" onPress={onPrivacy} /> : null}
+            <Button label={t('diagnosticsNoticeDismiss')} tone="ghost" onPress={() => onDismissDiagnosticsNotice?.()} />
+          </View>
+        </View>
+      ) : null}
       {notice ? <Text className="mt-3 text-sm" style={{ color: colors.text }}>{notice}</Text> : null}
       {bubbleNotice ? <Text accessibilityRole="alert" className="mt-2 text-sm" style={{ color: colors.warning }}>{bubbleNotice}</Text> : null}
 
@@ -132,9 +270,16 @@ export function HomeScreen({ home, busy, notice, onRefresh, onSettings, onCut }:
         </View>
         <Switch accessibilityLabel={t('showBubble')} value={home.bubbleEnabled} onValueChange={value => { setBubbleNotice(''); void toggleBubble(value).catch(() => { setBubbleNotice(t('readFailed')); onRefresh(); }); }} />
       </View> : null}
-      {Platform.OS === 'android' && showBubbleDemo ? <BubbleDemo onDismiss={() => setShowBubbleDemo(false)} /> : null}
+      {Platform.OS === 'android' && !home.bubbleEnabled && !pendingEnable && showBubbleDemo && home.bubbleSupported !== false ? (
+        <View className="mt-3">
+          <BubbleDemo onDismiss={() => setShowBubbleDemo(false)} />
+          <Text className="mt-4 text-base font-semibold" style={{ color: colors.text }}>{t('bubblePromoTitle')}</Text>
+          <Text className="mt-1 text-sm leading-5" style={{ color: colors.textMuted }}>{t('bubblePromoBody')}</Text>
+          <View className="mt-3"><Button label={t('bubblePromoEnable')} onPress={() => { void enableBubble().catch(() => setBubbleNotice(t('readFailed'))); }} /></View>
+        </View>
+      ) : null}
 
-      {home.rows.length > 0 ? <Text className="mb-2 mt-8 text-sm font-medium" style={{ color: colors.textMuted }}>{t('permissions')}</Text> : null}
+      {home.rows.some(row => row.kind !== 'overlay' || Platform.OS === 'android') ? <Text className="mb-2 mt-8 text-sm font-medium" style={{ color: colors.textMuted }}>{t('permissions')}</Text> : null}
       {home.rows.filter(row => row.kind !== 'overlay' || Platform.OS === 'android').map(row => (
         <PermissionRow
           key={row.kind}
@@ -142,11 +287,11 @@ export function HomeScreen({ home, busy, notice, onRefresh, onSettings, onCut }:
           title={t(permissionCopy(row.kind).title)}
           status={statusLabel[row.status]}
           statusTone={row.status === 'granted' ? 'good' : row.status === 'denied' ? 'warn' : 'neutral'}
-          needLabel={row.need === 'requiredForBubble' ? t('required') : t('optional')}
-          required={row.need === 'requiredForBubble'}
+          needLabel={permissionNeed(row.kind, home.bubbleEnabled || pendingEnable) === 'requiredForBubble' ? t('required') : t('optional')}
+          required={permissionNeed(row.kind, home.bubbleEnabled || pendingEnable) === 'requiredForBubble'}
           whyLabel={t('why')}
-          onOpen={() => { if (row.kind === 'notifications' && Platform.OS === 'android' && Platform.Version >= 33) { void PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS).then(onRefresh); } else { void Erase.openPermission(row.kind).then(onRefresh); } }}
-          onInfo={() => setSheet(row.kind)}
+          onOpen={openRow}
+          onInfo={openRowInfo}
         />
       ))}
 
@@ -157,20 +302,31 @@ export function HomeScreen({ home, busy, notice, onRefresh, onSettings, onCut }:
       ) : null}
 
         <Sheet
-        title={detail ? t(detail.title) : ''}
+        title={detailTitle}
         body={detailBody}
-        visible={detail != null}
-        closeLabel={t('gotIt')}
-        onClose={() => setSheet(null)}
+        visible={detail != null && (sheet?.blocked === true || sheet?.kind !== 'overlay' || sheet?.setup !== true)}
+        closeLabel={t(sheet?.blocked ? 'notNow' : 'gotIt')}
+        icon={sheet ? <PermissionIcon kind={sheet.kind} /> : undefined}
+        actionLabel={sheet?.blocked ? t('openSettings') : undefined}
+        onAction={sheet?.blocked ? () => {
+          const current = sheet;
+          setSheet(null);
+          void openPermissionSettings(current.kind, current.enableBubble);
+        } : undefined}
+        onClose={() => {
+          if (sheet?.enableBubble) updatePendingEnable(false);
+          setSheet(null);
+        }}
       />
       <Sheet
         title={t('bubbleSetupTitle')}
         body={t('bubbleSetupBody')}
-        visible={overlayInfo}
-        closeLabel={t('gotIt')}
+        visible={sheet?.kind === 'overlay' && sheet.setup === true && !sheet.blocked}
+        closeLabel={t('notNow')}
+        icon={<PermissionIcon kind="overlay" />}
         actionLabel={t('continueToSettings')}
-        onAction={() => { void enableBubble(); }}
-        onClose={() => setOverlayInfo(false)}
+        onAction={() => { setSheet(null); void openPermissionSettings('overlay', true); }}
+        onClose={() => { updatePendingEnable(false); setSheet(null); }}
       />
       <Modal transparent animationType="none" visible={sources} onDismiss={sourceDismissed} onRequestClose={closeSources}>
         <Pressable
@@ -222,13 +378,13 @@ const PermissionRow = memo(function PermissionRow({
   needLabel: string;
   required: boolean;
   whyLabel: string;
-  onOpen: () => void;
-  onInfo: () => void;
+  onOpen: (kind: PermissionKind) => void;
+  onInfo: (kind: PermissionKind) => void;
 }) {
   const { colors } = useTheme();
   return (
     <View className="mb-2 min-h-[72px] flex-row items-center rounded-3xl border px-3 py-2" style={{ backgroundColor: colors.surface, borderColor: colors.border }}>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${title}, ${status}, ${needLabel}`} className="min-h-12 flex-1 flex-row items-center" onPress={onOpen}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${title}, ${status}, ${needLabel}`} className="min-h-12 flex-1 flex-row items-center" onPress={() => onOpen(kind)}>
         <View className="me-3 h-10 w-10 items-center justify-center rounded-2xl" style={{ backgroundColor: colors.surfaceRaised }}>
           <PermissionIcon kind={kind} />
         </View>
@@ -243,7 +399,7 @@ const PermissionRow = memo(function PermissionRow({
         </View>
         </View>
       </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${whyLabel}: ${title}`} className="h-12 w-12 items-center justify-center rounded-full" style={{ backgroundColor: colors.surfaceRaised }} onPress={onInfo}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${whyLabel}: ${title}`} className="h-12 w-12 items-center justify-center rounded-full" style={{ backgroundColor: colors.surfaceRaised }} onPress={() => onInfo(kind)}>
         <InfoIcon />
       </Pressable>
     </View>

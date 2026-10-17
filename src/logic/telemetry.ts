@@ -1,6 +1,6 @@
 import { Erase, type AppPreferences } from '../native/Erase';
 
-export const DEFAULT_PREFERENCES: AppPreferences = { theme: 'system', analytics: false, crashes: false };
+export const DEFAULT_PREFERENCES: AppPreferences = { theme: 'system', analytics: true, crashes: true, diagnosticsNoticePending: true };
 export const PRODUCT_EVENTS = ['screen_view', 'screen_duration', 'cutout_started', 'cutout_completed', 'cutout_failed', 'cutout_cancelled', 'editor_action', 'export_completed', 'export_failed', 'bubble_changed', 'permission_result', 'locale_changed'] as const;
 export type ProductEvent = typeof PRODUCT_EVENTS[number];
 export type EventValues = Partial<{
@@ -9,12 +9,12 @@ export type EventValues = Partial<{
   enabled: boolean; locale: string; stage: string;
 }>;
 
-export async function readPreferences(): Promise<AppPreferences> {
+export async function readPreferences(requireSaved = false): Promise<AppPreferences> {
   try {
     const saved = await Erase.getPreferences?.();
     if (!saved) return DEFAULT_PREFERENCES;
-    return { theme: ['system', 'light', 'dark'].includes(saved.theme) ? saved.theme : 'system', analytics: saved.analytics === true, crashes: saved.crashes === true };
-  } catch { return DEFAULT_PREFERENCES; }
+    return { theme: ['system', 'light', 'dark'].includes(saved.theme) ? saved.theme : 'system', analytics: saved.analytics !== false, crashes: saved.crashes !== false, diagnosticsNoticePending: saved.diagnosticsNoticePending === true };
+  } catch (error) { if (requireSaved) throw error; return DEFAULT_PREFERENCES; }
 }
 
 export async function writePreferences(value: AppPreferences): Promise<void> {
