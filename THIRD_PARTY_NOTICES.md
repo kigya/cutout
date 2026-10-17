@@ -13,6 +13,7 @@ Cutout includes or adapts the following software. Original copyright notices and
 | ISNet general ONNX model | MIT | https://huggingface.co/imgly/isnet-general-onnx |
 | AndroidSVG | Apache-2.0 | https://github.com/BigBadaboom/androidsvg |
 | Firebase SDKs | Apache-2.0 | https://github.com/firebase |
+| Google Play In-App Review 2.0.2 (Android) | Google Play Core SDK Terms of Service | https://developer.android.com/guide/playcore/license |
 
 The bundled model revision, license metadata, and integrity hash are recorded in [the model notice](assets/licenses/isnet-model.md).
 
