@@ -293,6 +293,19 @@ class EraseModuleTest {
     }
 
     @Test
+    fun `home rejects when permission snapshot cannot be read`() = runTest {
+        val f = fixture()
+        every { f.preferences.enabled } returns MutableStateFlow(false)
+        every { f.permissions.snapshot() } throws IllegalStateException("permission service unavailable")
+
+        val promise = PromiseResult()
+        f.module.getHome(promise)
+
+        assertEquals("home" to "Could not refresh permissions", promise.rejected.await())
+        coVerify(exactly = 1) { f.bubble.stop() }
+    }
+
+    @Test
     fun `home revocation disables a stale enabled preference before returning`() = runTest {
         val f = fixture()
         every { f.preferences.enabled } returns MutableStateFlow(true)
@@ -333,6 +346,30 @@ class EraseModuleTest {
     }
 
     @Test
+    fun `home service start failure still settles when best effort cleanup also fails`() = runTest {
+        val f = fixture()
+        every { f.preferences.enabled } returns MutableStateFlow(true)
+        every { f.permissions.snapshot() } returns emptyList()
+        every { f.permissions.family() } returns OemFamily.Generic
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
+        coEvery { f.bubble.start() } throws IllegalStateException("service unavailable")
+        coEvery { f.preferences.setEnabled(false) } throws IllegalStateException("storage unavailable")
+        coEvery { f.bubble.stop() } throws IllegalStateException("service unavailable")
+        try {
+            val promise = PromiseResult()
+            f.module.getHome(promise)
+            val home = promise.value() as WritableMap
+
+            assertFalse(home.getBoolean("bubbleEnabled"))
+            assertTrue(home.hasKey("rows"))
+            coVerify(exactly = 1) { f.preferences.setEnabled(false) }
+            coVerify(exactly = 1) { f.bubble.stop() }
+        } finally {
+            org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
+        }
+    }
+
+    @Test
     fun `bubble service failure rejects and best-effort disables persisted state`() = runTest {
         val f = fixture()
         every { f.permissions.snapshot() } returns listOf(
@@ -341,6 +378,30 @@ class EraseModuleTest {
         org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
         coEvery { f.preferences.setEnabled(any()) } returns Unit
         coEvery { f.bubble.start() } throws IllegalStateException("service unavailable")
+        try {
+            val promise = PromiseResult()
+            f.module.setBubble(true, promise)
+
+            assertEquals("bubble" to "Could not change Bubble", promise.rejected.await())
+            coVerify(exactly = 1) { f.preferences.setEnabled(true) }
+            coVerify(exactly = 1) { f.preferences.setEnabled(false) }
+            coVerify(exactly = 1) { f.bubble.stop() }
+        } finally {
+            org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
+        }
+    }
+
+    @Test
+    fun `bubble service failure settles even when best effort recovery fails`() = runTest {
+        val f = fixture()
+        every { f.permissions.snapshot() } returns listOf(
+            PermissionSnapshot(PermissionKind.Overlay, GrantStatus.Granted),
+        )
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
+        coEvery { f.preferences.setEnabled(true) } returns Unit
+        coEvery { f.preferences.setEnabled(false) } throws IllegalStateException("storage unavailable")
+        coEvery { f.bubble.start() } throws IllegalStateException("service unavailable")
+        coEvery { f.bubble.stop() } throws IllegalStateException("service unavailable")
         try {
             val promise = PromiseResult()
             f.module.setBubble(true, promise)

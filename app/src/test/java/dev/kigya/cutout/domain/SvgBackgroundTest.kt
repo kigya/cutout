@@ -99,7 +99,12 @@ class SvgBackgroundTest {
         val edited = stripSolidBackdrop(source)
 
         assertTrue(edited is SvgEdit.Stripped)
-        assertFalse((edited as SvgEdit.Stripped).svg.contains("<rect"))
-        assertTrue(edited.svg.contains("<path"))
+        val output = (edited as SvgEdit.Stripped).svg
+        val document = javax.xml.parsers.DocumentBuilderFactory.newInstance().newDocumentBuilder()
+            .parse(org.xml.sax.InputSource(java.io.StringReader(output)))
+        val rectangles = document.getElementsByTagName("rect")
+        assertEquals(1, rectangles.length)
+        assertEquals("defs", rectangles.item(0).parentNode.nodeName)
+        assertTrue(output.contains("<path"))
     }
 }
