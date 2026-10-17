@@ -29,7 +29,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
   private var pendingEdit: [String: Any]?
   private let cutLock = NSLock()
   private var currentCut: UUID?
-  private var svgJobs: [UUID: (WKWebView, RCTPromiseResolveBlock, RCTPromiseRejectBlock)] = [:]
+  private var svgJobs: [UUID: (WKWebView, RCTPromiseResolveBlock, RCTPromiseRejectBlock, UUID?)] = [:]
   private let fm = FileManager.default
 
   @objc override static func requiresMainQueueSetup() -> Bool { true }
@@ -516,10 +516,10 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
   private func process(image: UIImage, rasterizedSvg: Bool, pickerRequestID requestID: UUID?, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
     let token = UUID()
     guard beginProcessing(token: token, pickerRequestID: requestID) else { return }
-    process(image: image, rasterizedSvg: rasterizedSvg, token: token, resolve: resolve, reject: reject)
+    process(image: image, rasterizedSvg: rasterizedSvg, token: token, pickerRequestID: requestID, resolve: resolve, reject: reject)
   }
 
-  private func process(image: UIImage, rasterizedSvg: Bool, token: UUID, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+  private func process(image: UIImage, rasterizedSvg: Bool, token: UUID, pickerRequestID requestID: UUID? = nil, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
     processingQueue.async {
       do {
         guard self.isCurrentCut(token) else { throw NSError(domain: "Erase", code: 3, userInfo: [NSLocalizedDescriptionKey: "cancelled"]) }
@@ -530,36 +530,38 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
         self.emitPreview(sourceURL.path)
         guard self.isCurrentCut(token) else { throw NSError(domain: "Erase", code: 3, userInfo: [NSLocalizedDescriptionKey: "cancelled"]) }
         try self.modelQueue.sync { try self.prepareModelIfNeeded() }
+        // Model construction can take long enough for cancellation or a newer picker request.
+        // Recheck before emitting progress or entering the non-cancellable ORT run.
+        guard self.isCurrentCut(token) else { throw NSError(domain: "Erase", code: 3, userInfo: [NSLocalizedDescriptionKey: "cancelled"]) }
         self.emitProgress(28)
         guard let full = self.segment(normalized), let fullPNG = full.pngData() else {
-          guard self.isCurrentCut(token) else { throw NSError(domain: "Erase", code: 3, userInfo: [NSLocalizedDescriptionKey: "cancelled"]) }
-          let edit = try self.storeEdit(original: normalized, cutout: normalized)
-          DispatchQueue.main.async {
-            guard self.isCurrentCut(token) else { resolve(["status": "failed", "message": "cancelled"]); return }
-            self.emitProgress(100)
-            resolve(["status": "manual", "message": "manual_cut", "originalPath": edit.0, "cutoutPath": edit.1, "width": edit.2, "height": edit.3])
+          guard let edit = try self.withCurrentCut(token, { try self.storeEdit(original: normalized, cutout: normalized) }) else {
+            throw NSError(domain: "Erase", code: 3, userInfo: [NSLocalizedDescriptionKey: "cancelled"])
+          }
+          let response: [String: Any] = ["status": "manual", "message": "manual_cut", "originalPath": edit.0, "cutoutPath": edit.1, "width": edit.2, "height": edit.3]
+          if !self.finishProcessing(token: token, pickerRequestID: requestID, value: response, resolve: resolve, progress: 100), requestID == nil {
+            DispatchQueue.main.async { resolve(["status": "failed", "message": "cancelled"]) }
           }
           return
         }
-        guard self.isCurrentCut(token) else { DispatchQueue.main.async { resolve(["status": "failed", "message": "cancelled"]) }; return }
+        guard self.isCurrentCut(token) else { throw NSError(domain: "Erase", code: 3, userInfo: [NSLocalizedDescriptionKey: "cancelled"]) }
         self.emitProgress(92)
         let tight = self.cropAlpha(full) ?? full
         let resultURL = try self.writeFile(fullPNG, name: "cutout")
-        guard self.isCurrentCut(token) else { DispatchQueue.main.async { resolve(["status": "failed", "message": "cancelled"]) }; return }
-        let edit = try self.storeEdit(original: normalized, cutout: full)
+        guard let edit = try self.withCurrentCut(token, { try self.storeEdit(original: normalized, cutout: full) }) else {
+          throw NSError(domain: "Erase", code: 3, userInfo: [NSLocalizedDescriptionKey: "cancelled"])
+        }
         var response: [String: Any] = ["status": "ready", "message": rasterizedSvg ? "svg_as_png" : "copied", "originalPath": edit.0, "cutoutPath": edit.1, "width": edit.2, "height": edit.3]
         response["previewPath"] = resultURL.path
         let clipboardData = tight.pngData() ?? fullPNG
-        DispatchQueue.main.async {
-          let published = self.withCurrentCut(token) {
-            UIPasteboard.general.setData(clipboardData, forPasteboardType: UTType.png.identifier)
-          }
-          guard published != nil else { resolve(["status": "failed", "message": "cancelled"]); return }
-          self.emitProgress(100)
-          resolve(response)
+        if !self.finishProcessing(token: token, pickerRequestID: requestID, value: response, clipboardData: clipboardData, resolve: resolve, progress: 100), requestID == nil {
+          DispatchQueue.main.async { resolve(["status": "failed", "message": "cancelled"]) }
         }
       } catch {
-        DispatchQueue.main.async { resolve(["status": "failed", "message": self.isCurrentCut(token) ? "model_failed" : "cancelled"]) }
+        let value = ["status": "failed", "message": self.isCurrentCut(token) ? "model_failed" : "cancelled"]
+        if !self.finishProcessing(token: token, pickerRequestID: requestID, value: value, resolve: resolve), requestID == nil {
+          DispatchQueue.main.async { resolve(value) }
+        }
       }
     }
   }
@@ -572,11 +574,13 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     let token = UUID()
     guard beginProcessing(token: token, pickerRequestID: requestID) else { return }
     if let stripped = stripSolidBackdrop(text) {
-      let published = withCurrentCut(token) {
-        UIPasteboard.general.setData(Data(stripped.utf8), forPasteboardType: UTType.svg.identifier)
+      let response = ["status": "svg", "message": "copied"]
+      if !finishProcessing(token: token, pickerRequestID: requestID, value: response,
+                           clipboardData: Data(stripped.utf8), clipboardType: UTType.svg.identifier,
+                           resolve: resolve), requestID == nil {
+        resolve(["status": "failed", "message": "cancelled"])
       }
-      guard published != nil else { resolve(["status": "failed", "message": "cancelled"]); return }
-      resolve(["status": "svg", "message": "copied"]); return
+      return
     }
     emitProgress(8)
     // Render only the embedded SVG data. JavaScript and all external loads are disabled.
@@ -592,7 +596,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
       web.isOpaque = false
       web.backgroundColor = .clear
       web.navigationDelegate = self
-      self.svgJobs[token] = (web, resolve, reject)
+      self.svgJobs[token] = (web, resolve, reject, requestID)
       let csp = "default-src 'none'; img-src data:; style-src 'unsafe-inline';"
       let html = "<!doctype html><html><head><meta http-equiv=\"Content-Security-Policy\" content=\"\(csp)\"><style>html,body{margin:0;width:1024px;height:1024px;overflow:hidden;background:transparent}img{display:block;width:1024px;height:1024px;object-fit:contain}</style></head><body><img id=\"s\" src=\"data:image/svg+xml;base64,\(data.base64EncodedString())\"></body></html>"
       web.loadHTMLString(html, baseURL: nil)
@@ -607,7 +611,7 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
       webView.removeFromSuperview()
       guard self.isCurrentCut(token) else { job.1(["status": "failed", "message": "cancelled"]); return }
       guard error == nil, let snapshot else { job.1(["status": "failed", "message": "read_failed"]); return }
-      self.process(image: snapshot, rasterizedSvg: true, token: token, resolve: job.1, reject: job.2)
+      self.process(image: snapshot, rasterizedSvg: true, token: token, pickerRequestID: job.3, resolve: job.1, reject: job.2)
     }
   }
 
@@ -804,6 +808,53 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     cutLock.lock(); defer { cutLock.unlock() }
     guard currentCut == token else { return nil }
     return try action()
+  }
+
+  /// Publishes a completed result and claims completion under the same lock order used by
+  /// cancelCut (pickerLock -> cutLock). For picker jobs this makes cancellation and clipboard
+  /// publication mutually exclusive; once publication wins, the picker promise is claimed too.
+  private func finishProcessing(token: UUID, pickerRequestID requestID: UUID?, value: Any,
+                                clipboardData: Data? = nil, clipboardType: String = UTType.png.identifier,
+                                resolve: @escaping RCTPromiseResolveBlock, progress: Int? = nil) -> Bool {
+    var didFinish = false
+    let finish = {
+      self.pickerLock.lock()
+      self.cutLock.lock()
+      guard self.currentCut == token, requestID == nil || self.pickerRequestID == requestID else {
+        self.cutLock.unlock()
+        self.pickerLock.unlock()
+        return
+      }
+
+      if let clipboardData {
+        UIPasteboard.general.setData(clipboardData, forPasteboardType: clipboardType)
+      }
+      self.currentCut = nil
+
+      var completion = resolve
+      if requestID != nil {
+        completion = self.pickerResolve ?? resolve
+        self.pickerResolve = nil
+        self.pickerRequestID = nil
+        self.pickerAwaitingData = false
+        self.pickerLoadTimeout?.cancel()
+        self.pickerLoadTimeout = nil
+        self.pickerControllers.removeAll()
+      }
+
+      self.cutLock.unlock()
+      self.pickerLock.unlock()
+      if let progress { self.emitProgress(progress) }
+      completion(value)
+      didFinish = true
+    }
+
+    if Thread.isMainThread {
+      finish()
+    } else {
+      DispatchQueue.main.sync(execute: finish)
+    }
+    return didFinish
   }
 
   private func lockedCurrentCut() -> UUID? {
