@@ -4,6 +4,7 @@ module.exports = {
   testMatch: ['<rootDir>/src/**/*.test.ts', '<rootDir>/src/**/*.test.tsx'],
   coverageReporters: ['text', 'lcov', 'json', 'json-summary'],
   collectCoverageFrom: [
+    'index.js',
     'src/**/*.{ts,tsx}',
     '!src/**/*.test.ts',
     '!src/**/*.test.tsx',
