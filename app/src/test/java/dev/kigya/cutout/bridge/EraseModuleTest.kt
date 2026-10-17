@@ -61,10 +61,14 @@ import io.mockk.unmockkObject
 import io.mockk.unmockkStatic
 import io.mockk.verify
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -306,6 +310,41 @@ class EraseModuleTest {
     }
 
     @Test
+    fun `home invalidation rejects while waiting for persisted bubble state`() = runTest {
+        val f = fixture()
+        val waiting = CompletableDeferred<Unit>()
+        every { f.preferences.enabled } returns flow {
+            waiting.complete(Unit)
+            awaitCancellation()
+        }
+
+        val promise = PromiseResult()
+        f.module.getHome(promise)
+        waiting.await()
+        f.module.invalidate()
+
+        assertEquals("cancelled" to "Home refresh cancelled", promise.rejected.await())
+    }
+
+    @Test
+    fun `home service cancellation rejects as cancelled before probing permissions`() = runTest {
+        val f = fixture()
+        every { f.preferences.enabled } returns MutableStateFlow(true)
+        every { f.permissions.family() } returns OemFamily.Generic
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
+        coEvery { f.bubble.start() } throws kotlinx.coroutines.CancellationException("service start cancelled")
+        try {
+            val promise = PromiseResult()
+            f.module.getHome(promise)
+
+            assertEquals("cancelled" to "Home refresh cancelled", promise.rejected.await())
+            verify(exactly = 0) { f.permissions.snapshot() }
+        } finally {
+            org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
+        }
+    }
+
+    @Test
     fun `home revocation disables a stale enabled preference before returning`() = runTest {
         val f = fixture()
         every { f.preferences.enabled } returns MutableStateFlow(true)
@@ -408,6 +447,128 @@ class EraseModuleTest {
 
             assertEquals("bubble" to "Could not change Bubble", promise.rejected.await())
             coVerify(exactly = 1) { f.preferences.setEnabled(true) }
+            coVerify(exactly = 1) { f.preferences.setEnabled(false) }
+            coVerify(exactly = 1) { f.bubble.stop() }
+        } finally {
+            org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
+        }
+    }
+
+    @Test
+    fun `bubble service cancellation rejects with the cancellation contract`() = runTest {
+        val f = fixture()
+        every { f.permissions.snapshot() } returns listOf(
+            PermissionSnapshot(PermissionKind.Overlay, GrantStatus.Granted),
+        )
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
+        coEvery { f.preferences.setEnabled(true) } returns Unit
+        val waiting = CompletableDeferred<Unit>()
+        coEvery { f.bubble.start() } coAnswers {
+            waiting.complete(Unit)
+            awaitCancellation()
+        }
+        try {
+            val promise = PromiseResult()
+            f.module.setBubble(true, promise)
+            waiting.await()
+            f.module.invalidate()
+
+            assertEquals("cancelled" to "Bubble change cancelled", promise.rejected.await())
+        } finally {
+            org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
+        }
+    }
+
+    @Test
+    fun `bubble start cancellation from the service rejects with the cancellation contract`() = runTest {
+        val f = fixture()
+        every { f.permissions.snapshot() } returns listOf(
+            PermissionSnapshot(PermissionKind.Overlay, GrantStatus.Granted),
+        )
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
+        coEvery { f.preferences.setEnabled(true) } returns Unit
+        coEvery { f.bubble.start() } throws kotlinx.coroutines.CancellationException("start cancelled")
+        try {
+            val promise = PromiseResult()
+            f.module.setBubble(true, promise)
+
+            assertEquals("cancelled" to "Bubble change cancelled", promise.rejected.await())
+            coVerify(exactly = 1) { f.preferences.setEnabled(true) }
+        } finally {
+            org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
+        }
+    }
+
+    @Test
+    fun `hide service cancellation rejects with the cancellation contract`() = runTest {
+        val f = fixture()
+        coEvery { f.preferences.setEnabled(false) } returns Unit
+        val waiting = CompletableDeferred<Unit>()
+        coEvery { f.bubble.stop() } coAnswers {
+            waiting.complete(Unit)
+            awaitCancellation()
+        }
+
+        val promise = PromiseResult()
+        f.module.hideBubble(promise)
+        waiting.await()
+        f.module.invalidate()
+
+        assertEquals("cancelled" to "Bubble change cancelled", promise.rejected.await())
+    }
+
+    @Test
+    fun `hide cancellation from the service rejects with the cancellation contract`() = runTest {
+        val f = fixture()
+        coEvery { f.preferences.setEnabled(false) } returns Unit
+        coEvery { f.bubble.stop() } throws kotlinx.coroutines.CancellationException("stop cancelled")
+
+        val promise = PromiseResult()
+        f.module.hideBubble(promise)
+
+        assertEquals("cancelled" to "Bubble change cancelled", promise.rejected.await())
+        coVerify(exactly = 1) { f.preferences.setEnabled(false) }
+    }
+
+    @Test
+    fun `bubble recovery still settles as failed when persistence cleanup is cancelled`() = runTest {
+        val f = fixture()
+        every { f.permissions.snapshot() } returns listOf(
+            PermissionSnapshot(PermissionKind.Overlay, GrantStatus.Granted),
+        )
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
+        coEvery { f.preferences.setEnabled(true) } returns Unit
+        coEvery { f.preferences.setEnabled(false) } throws kotlinx.coroutines.CancellationException("recovery cancelled")
+        coEvery { f.bubble.start() } throws IllegalStateException("start failed")
+        try {
+            val promise = PromiseResult()
+            f.module.setBubble(true, promise)
+
+            // The operation already failed before cleanup was cancelled; the bridge settles
+            // that original failure once while allowing the cleanup cancellation to propagate.
+            assertEquals("bubble" to "Could not change Bubble", promise.rejected.await())
+            coVerify(exactly = 0) { f.bubble.stop() }
+        } finally {
+            org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(false)
+        }
+    }
+
+    @Test
+    fun `bubble recovery still settles as failed when stopping cleanup is cancelled`() = runTest {
+        val f = fixture()
+        every { f.permissions.snapshot() } returns listOf(
+            PermissionSnapshot(PermissionKind.Overlay, GrantStatus.Granted),
+        )
+        org.robolectric.shadows.ShadowSettings.setCanDrawOverlays(true)
+        coEvery { f.preferences.setEnabled(true) } returns Unit
+        coEvery { f.preferences.setEnabled(false) } throws IllegalStateException("storage failed")
+        coEvery { f.bubble.start() } throws IllegalStateException("start failed")
+        coEvery { f.bubble.stop() } throws kotlinx.coroutines.CancellationException("recovery stop cancelled")
+        try {
+            val promise = PromiseResult()
+            f.module.setBubble(true, promise)
+
+            assertEquals("bubble" to "Could not change Bubble", promise.rejected.await())
             coVerify(exactly = 1) { f.preferences.setEnabled(false) }
             coVerify(exactly = 1) { f.bubble.stop() }
         } finally {
@@ -741,6 +902,10 @@ class EraseModuleTest {
         val unavailable = PromiseResult()
         f.module.prepareModel(unavailable)
         assertEquals("failed", unavailable.value())
+        coEvery { f.cutter.prepare() } returns Result.failure(IllegalStateException("model unavailable"))
+        val diagnosed = PromiseResult()
+        f.module.prepareModel(diagnosed)
+        assertEquals("model unavailable", diagnosed.value())
 
         every { f.masks.readAlpha("throws.png") } throws IllegalStateException("disk")
         val read = PromiseResult()
@@ -1014,6 +1179,37 @@ class EraseModuleTest {
     }
 
     @Test
+    fun `cancelling an older cut does not lose the replacement cut handle`() = runTest {
+        val f = fixture()
+        val callCount = AtomicInteger()
+        val firstStarted = CompletableDeferred<Unit>()
+        val replacementStarted = CompletableDeferred<Unit>()
+        coEvery { f.cutter.cutFixture(any()) } coAnswers {
+            when (callCount.getAndIncrement()) {
+                0 -> firstStarted.complete(Unit)
+                1 -> replacementStarted.complete(Unit)
+            }
+            kotlinx.coroutines.awaitCancellation()
+        }
+
+        val older = PromiseResult()
+        f.module.cutFixture(older)
+        firstStarted.await()
+
+        val replacement = PromiseResult()
+        f.module.cutFixture(replacement)
+        replacementStarted.await()
+        assertEquals(Messages.CANCELLED, (older.value() as WritableMap).string("message"))
+
+        val cancel = PromiseResult()
+        f.module.cancelCut(cancel)
+        runCurrent()
+
+        assertNull(cancel.value())
+        assertEquals(Messages.CANCELLED, (replacement.value() as WritableMap).string("message"))
+    }
+
+    @Test
     fun `clipboard empty and toggle action preserve public map shape`() = runTest {
         val f = fixture()
         val state = PromiseResult()
@@ -1073,6 +1269,53 @@ class EraseModuleTest {
         coVerify(exactly = 1) { f.presenter.onEvent(BubbleUiEvent.Refine) }
         coVerify(exactly = 1) { f.presenter.onEvent(BubbleUiEvent.Dismiss) }
         coVerify(exactly = 1) { f.presenter.onEvent(BubbleUiEvent.Again) }
+    }
+
+    @Test
+    fun `bubble action waits for asynchronous state publication before resolving`() = runTest {
+        val f = fixture()
+        coEvery { f.presenter.onEvent(BubbleUiEvent.Toggle) } answers {
+            backgroundScope.launch {
+                kotlinx.coroutines.delay(1)
+                f.state.value = f.state.value.copy(revision = f.state.value.revision + 1, expanded = true)
+            }
+        }
+
+        val promise = PromiseResult()
+        f.module.bubbleAction("toggle", promise)
+        runCurrent()
+        assertFalse(promise.resolved.isCompleted)
+
+        advanceTimeBy(1)
+        runCurrent()
+
+        val state = promise.value() as WritableMap
+        assertTrue(state.getBoolean("expanded"))
+        assertEquals(1, state.getInt("revision"))
+    }
+
+    @Test
+    fun `clipboard action ignores intermediate working state until a terminal state arrives`() = runTest {
+        val f = fixture()
+        coEvery { f.presenter.onEvent(BubbleUiEvent.FromClipboard) } answers {
+            backgroundScope.launch {
+                f.state.value = f.state.value.copy(revision = f.state.value.revision + 1, phase = BubblePhase.Working)
+                kotlinx.coroutines.delay(1)
+                f.state.value = f.state.value.copy(revision = f.state.value.revision + 1, phase = BubblePhase.Copied)
+            }
+        }
+
+        val promise = PromiseResult()
+        f.module.bubbleAction("clipboard", promise)
+        runCurrent()
+        assertFalse(promise.resolved.isCompleted)
+
+        advanceTimeBy(1)
+        runCurrent()
+
+        val state = promise.value() as WritableMap
+        assertEquals("copied", state.string("phase"))
+        assertEquals(2, state.getInt("revision"))
     }
 
     @Test
