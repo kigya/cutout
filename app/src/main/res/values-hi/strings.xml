@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">बबल स्क्रीन पर है</string>
+    <string name="notification_hide">बबल छिपाएँ</string>
+    <string name="channel_name">बबल</string>
+    <string name="channel_description">जब तक बबल चालू है, उसे स्क्रीन पर रखता है</string>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Бульбашка на екрані</string>
+    <string name="notification_hide">Сховати бульбашку</string>
+    <string name="channel_name">Бульбашка</string>
+    <string name="channel_description">Потрібно, щоб бульбашка не зникала, поки її увімкнено</string>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Η φυσαλίδα είναι στην οθόνη</string>
+    <string name="notification_hide">Απόκρυψη φυσαλίδας</string>
+    <string name="channel_name">Φυσαλίδα</string>
+    <string name="channel_description">Κρατά τη φυσαλίδα στην οθόνη όσο είναι ενεργή</string>
+</resources>

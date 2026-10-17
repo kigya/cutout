@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">بلبلہ اسکرین پر ہے</string>
+    <string name="notification_hide">بلبلہ چھپائیں</string>
+    <string name="channel_name">بلبلہ</string>
+    <string name="channel_description">جب تک بلبلہ چالو ہے اسے اسکرین پر رکھتا ہے</string>
+</resources>

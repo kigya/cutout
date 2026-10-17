@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Bublina je na obrazovce</string>
+    <string name="notification_hide">Skrýt bublinu</string>
+    <string name="channel_name">Bublina</string>
+    <string name="channel_description">Drží bublinu na obrazovce, dokud je zapnutá</string>
+</resources>

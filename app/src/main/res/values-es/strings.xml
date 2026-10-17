@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">La burbuja está en pantalla</string>
+    <string name="notification_hide">Ocultar burbuja</string>
+    <string name="channel_name">Burbuja</string>
+    <string name="channel_description">Mantiene la burbuja en pantalla mientras está activada</string>
+</resources>

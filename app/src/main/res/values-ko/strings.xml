@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">버블이 화면에 있습니다</string>
+    <string name="notification_hide">버블 숨기기</string>
+    <string name="channel_name">버블</string>
+    <string name="channel_description">버블이 켜져 있는 동안 화면에 둡니다</string>
+</resources>

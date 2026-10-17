@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">הבועה על המסך</string>
+    <string name="notification_hide">הסתרת הבועה</string>
+    <string name="channel_name">בועה</string>
+    <string name="channel_description">שומר את הבועה על המסך כל עוד היא פעילה</string>
+</resources>

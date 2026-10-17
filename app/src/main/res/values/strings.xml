@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">Cutout</string>
+    <string name="notification_title" translatable="false">Cutout</string>
+    <string name="notification_text">Bubble is on screen</string>
+    <string name="notification_hide">Hide bubble</string>
+    <string name="channel_name">Bubble</string>
+    <string name="channel_description">Keeps the bubble on screen while it is enabled</string>
+</resources>

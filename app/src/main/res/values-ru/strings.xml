@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Пузырь на экране</string>
+    <string name="notification_hide">Скрыть пузырь</string>
+    <string name="channel_name">Пузырь</string>
+    <string name="channel_description">Нужно, чтобы пузырь не исчезал, пока он включён</string>
+</resources>

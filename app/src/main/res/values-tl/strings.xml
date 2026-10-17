@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Nasa screen ang bubble</string>
+    <string name="notification_hide">Itago ang bubble</string>
+    <string name="channel_name">Bubble</string>
+    <string name="channel_description">Pinapanatili ang bubble sa screen habang naka-on ito</string>
+</resources>

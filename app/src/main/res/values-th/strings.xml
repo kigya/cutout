@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">บับเบิลอยู่บนหน้าจอ</string>
+    <string name="notification_hide">ซ่อนบับเบิล</string>
+    <string name="channel_name">บับเบิล</string>
+    <string name="channel_description">คงบับเบิลไว้บนหน้าจอขณะที่เปิดอยู่</string>
+</resources>

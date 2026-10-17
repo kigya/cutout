@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Bubblan är på skärmen</string>
+    <string name="notification_hide">Dölj bubblan</string>
+    <string name="channel_name">Bubbla</string>
+    <string name="channel_description">Håller bubblan på skärmen så länge den är på</string>
+</resources>
