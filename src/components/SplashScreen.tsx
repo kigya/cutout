@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import { AccessibilityInfo, Image, StatusBar, View } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import { AccessibilityInfo, StatusBar, View } from 'react-native';
+import { Canvas, Group, Path } from '@shopify/react-native-skia';
+import Animated, { Easing, useAnimatedStyle, useDerivedValue, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import { BRAND_MARK_PATHS, BRAND_MARK_SCALE } from './brand/markPaths';
 
 type Props = { onDone: () => void };
 export const SPLASH_BACKGROUND = '#2259CF';
+export const SPLASH_MARK_SIZE = 160;
 
 /** A little cutout: the eraser follows the paper edge, scraps leave, the mark stays. */
 export function SplashScreen({ onDone }: Props) {
@@ -12,6 +15,7 @@ export function SplashScreen({ onDone }: Props) {
   const trace = useSharedValue(0);
   const reveal = useSharedValue(0);
   const scraps = useSharedValue(0);
+  const traceEnd = useDerivedValue(() => trace.value);
   useEffect(() => {
     let mounted = true;
     void AccessibilityInfo.isReduceMotionEnabled().then(value => { if (mounted) setReducedMotion(value); });
@@ -55,7 +59,16 @@ export function SplashScreen({ onDone }: Props) {
       <View accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 224, height: 224, alignItems: 'center', justifyContent: 'center' }}>
         <Animated.View style={[{ position: 'absolute', width: 164, height: 184, borderRadius: 28, backgroundColor: '#7C9EE8', borderWidth: 2, borderColor: '#ADC6FF', borderStyle: 'dashed' }, paperStyle]} />
         <Animated.View style={markStyle}>
-          <Image source={require('../assets/bubble-icon.png')} style={{ width: 160, height: 160, tintColor: '#FFFFFF' }} resizeMode="contain" />
+          <Canvas style={{ width: SPLASH_MARK_SIZE, height: SPLASH_MARK_SIZE }}>
+            <Group transform={[{ scale: BRAND_MARK_SCALE }]}>
+              <Path path={BRAND_MARK_PATHS.avatar} color="#FFFFFF" fillType="evenOdd" />
+              <Path path={BRAND_MARK_PATHS.edge} color="#FFFFFF" opacity={traceEnd} />
+              <Path path={BRAND_MARK_PATHS.sparkleLarge} color="#FFFFFF" />
+              <Path path={BRAND_MARK_PATHS.sparkleSmall} color="#FFFFFF" />
+              <Path path={BRAND_MARK_PATHS.eraserA} color="#FFFFFF" />
+              <Path path={BRAND_MARK_PATHS.eraserB} color="#FFFFFF" />
+            </Group>
+          </Canvas>
         </Animated.View>
         <Animated.View style={[{ position: 'absolute', left: 22, top: 20, width: 22, height: 36, borderRadius: 5, backgroundColor: '#ADC6FF' }, topScrap]} />
         <Animated.View style={[{ position: 'absolute', right: 22, bottom: 24, width: 28, height: 24, borderRadius: 5, backgroundColor: '#7C9EE8' }, bottomScrap]} />

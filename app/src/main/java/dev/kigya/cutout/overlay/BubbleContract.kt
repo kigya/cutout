@@ -23,6 +23,22 @@ data class BubbleUiState(
     val percent: Int = 0,
 )
 
+/** Native-owned viewport for the persistent React surface embedded in BubbleService. */
+data class BubbleGeometry(
+    val revision: Long,
+    val expanded: Boolean,
+    val anchorEnd: Boolean,
+    val windowWidthDp: Int,
+    val windowHeightDp: Int,
+    val surfaceWidthDp: Int = 628,
+    val surfaceHeightDp: Int = 400,
+    val chipSizeDp: Int = 84,
+    val panelWidthDp: Int = 260,
+    val panelHeightDp: Int = 260,
+    val chipLeftDp: Int = 272,
+    val chipTopDp: Int = 0,
+)
+
 sealed interface BubbleUiEvent {
     data object Toggle : BubbleUiEvent
     data object FromClipboard : BubbleUiEvent

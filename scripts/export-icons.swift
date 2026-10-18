@@ -42,10 +42,10 @@ func export(_ glyph: CGImage, _ path: String, size: Int, fraction: Double, opaqu
 }
 let colored = trimmed(load("assets/brand/icon-foreground.png"))
 let monochrome = colored // identical alpha geometry for themed launcher icons
-try export(colored, "app/src/main/res/drawable-nodpi/ic_launcher_foreground.png", size: 432, fraction: 0.56)
-try export(monochrome, "app/src/main/res/drawable-nodpi/ic_launcher_monochrome.png", size: 432, fraction: 0.56)
+try export(colored, "app/src/main/res/drawable-nodpi/ic_launcher_foreground.png", size: 432, fraction: 0.476)
+try export(monochrome, "app/src/main/res/drawable-nodpi/ic_launcher_monochrome.png", size: 432, fraction: 0.476)
 try export(monochrome, "app/src/main/res/drawable-nodpi/ic_stat_bubble.png", size: 96, fraction: 0.82)
 try export(colored, "src/assets/bubble-icon.png", size: 192, fraction: 0.86)
 try export(colored, "assets/brand/icon.png", size: 1024, fraction: 0.64, opaque: true)
 let sizes = [20,29,40,58,60,76,80,87,120,152,167,180,1024]
-for size in sizes { try export(colored, "ios/Cutout/Images.xcassets/AppIcon.appiconset/icon-\(size).png", size: size, fraction: 0.64, opaque: true) }
+for size in sizes { try export(colored, "ios/Cutout/Images.xcassets/AppIcon.appiconset/icon-\(size).png", size: size, fraction: 0.544, opaque: true) }

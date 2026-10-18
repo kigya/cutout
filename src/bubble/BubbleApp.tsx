@@ -1,15 +1,16 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, ActivityIndicator, DeviceEventEmitter, Image, Pressable, ScrollView, Text, ToastAndroid, View } from 'react-native';
-import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { SweepPreview } from '../components/SweepPreview';
 import { Notice } from '../components/ui/notice';
 import { bubbleFrame } from '../logic/bubble';
 import { canUseClipboard } from '../logic/clipboard';
 import { clampPercent } from '../logic/progress';
 import { savePhase } from '../logic/save';
+import { isRtl } from '../logic/languages';
 import { localizeMessage } from '../i18n/catalogs';
 import { useLocale } from '../i18n/LocaleGate';
-import { Erase, type BubbleSnapshot } from '../native/Erase';
+import { Erase, type BubbleGeometry, type BubbleSnapshot } from '../native/Erase';
 import { useTheme } from '../theme/ThemeProvider';
 
 const EMPTY: BubbleSnapshot = {
@@ -31,6 +32,8 @@ export function BubbleApp() {
   const localeRef = useRef(locale);
   localeRef.current = locale;
   const [state, setState] = useState<BubbleSnapshot>(EMPTY);
+  const [geometry, setGeometry] = useState<BubbleGeometry | null>(null);
+  const geometryRevision = useRef(-1);
   const [note, setNote] = useState('');
   const [action, setAction] = useState<'copy' | 'save' | 'openEditor' | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -68,16 +71,32 @@ export function BubbleApp() {
     };
   }, []);
 
+  useEffect(() => {
+    let live = true;
+    const apply = (next: BubbleGeometry) => {
+      if (!live || next.revision <= geometryRevision.current) return;
+      geometryRevision.current = next.revision;
+      setGeometry(next);
+    };
+    const subscription = DeviceEventEmitter.addListener('bubbleGeometry', apply);
+    void Erase.getBubbleGeometry?.().then(next => { if (next) apply(next); }).catch(() => undefined);
+    return () => { live = false; subscription.remove(); };
+  }, []);
+  useEffect(() => {
+    if (geometry) Erase.ackBubbleGeometry?.(geometry.revision);
+  }, [geometry]);
+
   const busy = state.phase === 'working';
   const result = state.phase === 'copied' || (state.phase === 'failed' && state.editReady);
-  const frame = bubbleFrame(state);
+  const anchorEnd = geometry?.anchorEnd ?? state.anchorEnd;
+  const chipLeft = geometry?.chipLeftDp ?? 272;
+  const chipTop = geometry?.chipTopDp ?? 0;
+  const panelWidth = geometry?.panelWidthDp ?? 260;
+  const panelHeight = geometry?.panelHeightDp ?? bubbleFrame({ ...state, expanded: true }).height;
   useEffect(() => {
-    Erase.setBubbleSize(frame.width, frame.height);
-  }, [frame.height, frame.width]);
-  useEffect(() => {
-    side.value = state.anchorEnd ? 1 : -1;
+    side.value = anchorEnd ? 1 : -1;
     panel.value = state.expanded && !reducedMotion ? withTiming(1, { duration: 160 }) : state.expanded ? 1 : 0;
-  }, [panel, reducedMotion, side, state.anchorEnd, state.expanded]);
+  }, [anchorEnd, panel, reducedMotion, side, state.expanded]);
 
   const panelStyle = useAnimatedStyle(() => ({
     opacity: panel.value,
@@ -160,7 +179,7 @@ export function BubbleApp() {
   }
 
   const actions = (
-    <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 12 }} className="flex-1 rounded-3xl" style={{ backgroundColor: `${colors.surface}E6`, borderColor: colors.border, borderWidth: 1 }}>
+    <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 12 }} className="flex-1 rounded-3xl" testID="bubble-actions" style={{ direction: isRtl(locale) ? 'rtl' : 'ltr', backgroundColor: `${colors.surface}E6`, borderColor: colors.border, borderWidth: 1 }}>
       <Pressable accessibilityRole="button" accessibilityLabel={t('hideBubble')} onPress={() => { void hide(); }} style={{ minHeight: 48, alignSelf: 'flex-end', justifyContent: 'center', paddingHorizontal: 16 }}><Text style={{ color: colors.text }}>✕</Text></Pressable>
       <Text className="mb-2 text-base font-semibold" style={{ color: colors.text }}>{busy ? t('cutting') : t('cutBackground')}</Text>
       {busy ? (
@@ -195,8 +214,8 @@ export function BubbleApp() {
   );
 
   return (
-    <View style={{ width: frame.width, height: frame.height, flexDirection: state.anchorEnd ? 'row-reverse' : 'row' }}>
-      <View style={{ width: 84, height: 84 }}>
+    <View testID="bubble-surface" style={{ width: 628, height: 400, direction: 'ltr' }}>
+      <View testID="bubble-chip" style={{ direction: 'ltr', position: 'absolute', left: chipLeft, top: chipTop, width: 84, height: 84 }}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('cutBackground')}
@@ -207,9 +226,8 @@ export function BubbleApp() {
         </Pressable>
 
       </View>
-      {state.expanded ? <View style={{ width: 12 }} /> : null}
       {state.expanded ? (
-        <Animated.View entering={reducedMotion ? undefined : FadeIn.duration(160)} style={[{ flex: 1 }, panelStyle]}>
+        <Animated.View testID="bubble-panel" style={[{ direction: 'ltr', position: 'absolute', left: anchorEnd ? 260 - panelWidth : 368, top: 0, width: panelWidth, height: panelHeight }, panelStyle]}>
           {actions}
         </Animated.View>
       ) : null}

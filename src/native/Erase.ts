@@ -45,6 +45,22 @@ export type BubbleSnapshot = {
   percent: number;
 };
 
+/** Native WindowManager geometry; its revision is independent of processing state. */
+export type BubbleGeometry = {
+  revision: number;
+  expanded: boolean;
+  anchorEnd: boolean;
+  windowWidthDp: number;
+  windowHeightDp: number;
+  surfaceWidthDp: number;
+  surfaceHeightDp: number;
+  chipSizeDp: number;
+  panelWidthDp: number;
+  panelHeightDp: number;
+  chipLeftDp: number;
+  chipTopDp: number;
+};
+
 export type LocaleState = {
   selected: string;
   system: string;
@@ -76,6 +92,8 @@ type EraseNative = {
   cancelCut(): Promise<void>;
   bubbleAction(action: string): Promise<BubbleSnapshot>;
   getBubbleState(): Promise<BubbleSnapshot>;
+  getBubbleGeometry?(): Promise<BubbleGeometry | null>;
+  ackBubbleGeometry?(revision: number): void;
   readAlpha(path: string): Promise<string>;
   writeMasked(originalPath: string, alphaBase64: string, width: number, height: number): Promise<MaskResult>;
   publishPng(path: string): Promise<string>;

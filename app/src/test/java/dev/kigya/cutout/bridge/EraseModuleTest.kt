@@ -38,6 +38,7 @@ import dev.kigya.cutout.data.IncomingImage
 import dev.kigya.cutout.domain.Messages
 import dev.kigya.cutout.domain.OemFamily
 import dev.kigya.cutout.domain.PermissionKind
+import dev.kigya.cutout.overlay.BubbleGeometry
 import dev.kigya.cutout.overlay.BubblePhase
 import dev.kigya.cutout.overlay.BubblePresenter
 import dev.kigya.cutout.overlay.BubbleStarter
@@ -231,6 +232,38 @@ class EraseModuleTest {
 
     private suspend fun PromiseResult.value() = resolved.await()
     private fun ReadableMap.string(key: String) = getString(key)
+
+    @Test
+    fun `bubble native geometry is queried streamed only when active and acknowledged without JS sizing`() = runTest {
+        val f = fixture()
+        val empty = PromiseResult()
+        f.module.getBubbleGeometry(empty)
+        assertNull(empty.value())
+        val geometry = BubbleGeometry(7, true, false, 356, 340, panelHeightDp = 340)
+        f.window.publishGeometry(geometry)
+        runCurrent()
+        assertTrue(f.context.deviceEvents.isEmpty())
+        val snapshot = PromiseResult()
+        f.module.getBubbleGeometry(snapshot)
+        val map = snapshot.value() as ReadableMap
+        assertEquals(7.0, map.getDouble("revision"), 0.0)
+        assertEquals(628.0, map.getDouble("surfaceWidthDp"), 0.0)
+        assertEquals(272.0, map.getDouble("chipLeftDp"), 0.0)
+        assertEquals(340.0, map.getDouble("panelHeightDp"), 0.0)
+        f.context.activeReactInstance = true
+        f.window.publishGeometry(geometry.copy(revision = 8, expanded = false, windowWidthDp = 84, windowHeightDp = 84))
+        runCurrent()
+        val event = f.context.deviceEvents.single { it.first == "bubbleGeometry" }.second as ReadableMap
+        assertEquals(84.0, event.getDouble("windowWidthDp"), 0.0)
+        val acknowledgements = mutableListOf<Long>()
+        f.window.acknowledgeGeometry = { acknowledgements += it }
+        f.module.ackBubbleGeometry(Double.NaN)
+        f.module.ackBubbleGeometry(-1.0)
+        f.module.ackBubbleGeometry(8.0)
+        assertEquals(listOf(8L), acknowledgements)
+        f.window.acknowledgeGeometry = null
+        f.module.ackBubbleGeometry(9.0)
+    }
 
     @Test
     fun `home snapshots permissions off main thread and returns bridge allowlist`() = runTest {

@@ -23,6 +23,7 @@ import dev.kigya.cutout.overlay.BubblePresenter
 import dev.kigya.cutout.overlay.BubbleStarter
 import dev.kigya.cutout.overlay.BubbleUiEvent
 import dev.kigya.cutout.overlay.BubbleUiState
+import dev.kigya.cutout.overlay.BubbleGeometry
 import dev.kigya.cutout.overlay.BubbleWindow
 import dev.kigya.cutout.overlay.ClipboardActivity
 import dev.kigya.cutout.overlay.ClipboardBus
@@ -77,6 +78,15 @@ class EraseModule(
         scope.launch {
             presenter.state.collect { state ->
                 emitBubble(state)
+            }
+        }
+        scope.launch {
+            window.geometry.collect { geometry ->
+                if (geometry != null) UiThreadUtil.runOnUiThread {
+                    if (reactApplicationContext.hasActiveReactInstance()) {
+                        reactApplicationContext.emitDeviceEvent("bubbleGeometry", geometryMap(geometry))
+                    }
+                }
             }
         }
         scope.launch {
@@ -493,6 +503,18 @@ class EraseModule(
     }
 
     @ReactMethod
+    fun getBubbleGeometry(promise: Promise) {
+        promise.resolve(window.geometry.value?.let(::geometryMap))
+    }
+
+    @ReactMethod
+    fun ackBubbleGeometry(revision: Double) {
+        if (revision.isFinite() && revision >= 0) UiThreadUtil.runOnUiThread {
+            window.acknowledgeGeometry?.invoke(revision.toLong())
+        }
+    }
+
+    @ReactMethod
     fun setBubbleSize(width: Double, height: Double) {
         window.resize?.invoke(width.toFloat(), height.toFloat())
     }
@@ -632,6 +654,21 @@ class EraseModule(
             putString("status", "failed")
             putString("message", written.detail)
         }
+    }
+
+    private fun geometryMap(geometry: BubbleGeometry): WritableMap = Arguments.createMap().apply {
+        putDouble("revision", geometry.revision.toDouble())
+        putBoolean("expanded", geometry.expanded)
+        putBoolean("anchorEnd", geometry.anchorEnd)
+        putDouble("windowWidthDp", geometry.windowWidthDp.toDouble())
+        putDouble("windowHeightDp", geometry.windowHeightDp.toDouble())
+        putDouble("surfaceWidthDp", geometry.surfaceWidthDp.toDouble())
+        putDouble("surfaceHeightDp", geometry.surfaceHeightDp.toDouble())
+        putDouble("chipSizeDp", geometry.chipSizeDp.toDouble())
+        putDouble("panelWidthDp", geometry.panelWidthDp.toDouble())
+        putDouble("panelHeightDp", geometry.panelHeightDp.toDouble())
+        putDouble("chipLeftDp", geometry.chipLeftDp.toDouble())
+        putDouble("chipTopDp", geometry.chipTopDp.toDouble())
     }
 
     private fun bubbleMap(state: BubbleUiState): WritableMap = Arguments.createMap().apply {

@@ -137,6 +137,7 @@ beforeEach(() => {
   erase.getLocale.mockResolvedValue({ selected: '', system: 'en' });
   erase.consumePendingEdit.mockResolvedValue(null);
   erase.getBubbleState.mockResolvedValue({ ...bubble, expanded: false });
+  erase.getBubbleGeometry.mockResolvedValue(null);
   erase.bubbleAction.mockResolvedValue({ ...bubble, message: 'copied' });
   erase.readAlpha.mockResolvedValue(bytesToBase64(Uint8Array.from({ length: 16 }, () => 255)));
   erase.writeMasked.mockResolvedValue({ status: 'ready', path: '/masked.png' });
@@ -844,6 +845,7 @@ test('the bubble reports a saved cutout and a missing one', async () => {
   erase.bubbleAction.mockResolvedValue({ ...bubble, message: 'copied' });
   erase.getBubbleState.mockReset();
   erase.getBubbleState.mockResolvedValue({ ...bubble, expanded: false });
+  erase.getBubbleGeometry.mockResolvedValue(null);
   erase.saveToGallery.mockReset();
   erase.saveToGallery.mockResolvedValue('saved');
   await screen.unmount();

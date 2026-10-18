@@ -1,11 +1,18 @@
 package dev.kigya.cutout.overlay
 
 import android.app.Application
+import android.graphics.Insets
+import android.graphics.Rect
 import android.content.res.Configuration
 import android.content.Intent
 import android.os.SystemClock
 import android.os.Looper
 import android.view.MotionEvent
+import android.view.WindowInsets
+import android.view.WindowMetrics
+import android.view.InputDevice
+import android.view.Gravity
+import android.view.ViewConfiguration
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -28,6 +35,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -38,6 +46,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowSettings
 import org.robolectric.util.ReflectionHelpers
+import java.time.Duration
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
@@ -83,8 +92,62 @@ class BubbleServiceTest {
     private fun params(service: BubbleService) =
         ReflectionHelpers.getField<WindowManager.LayoutParams>(service, "params")
 
+    private fun pointers(
+        downTime: Long,
+        eventTime: Long,
+        action: Int,
+        ids: IntArray,
+        xs: FloatArray,
+        ys: FloatArray,
+    ): MotionEvent {
+        val properties = Array(ids.size) { index ->
+            MotionEvent.PointerProperties().apply {
+                id = ids[index]
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            }
+        }
+        val coordinates = Array(ids.size) { index ->
+            MotionEvent.PointerCoords().apply {
+                x = xs[index]
+                y = ys[index]
+                pressure = 1f
+                size = 1f
+            }
+        }
+        return MotionEvent.obtain(
+            downTime,
+            eventTime,
+            action,
+            ids.size,
+            properties,
+            coordinates,
+            0,
+            0,
+            1f,
+            1f,
+            0,
+            0,
+            InputDevice.SOURCE_TOUCHSCREEN,
+            0,
+        )
+    }
+
     @Test
-    fun `overlay attaches react surface exposes drag resize settle and clears callbacks on destroy`() {
+    @Config(qualifiers = "ar-rSA-ldrtl")
+    fun `RTL overlay keeps the persistent surface physically left aligned`() {
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
+        assertEquals(View.LAYOUT_DIRECTION_LTR, root.layoutDirection)
+        assertEquals(0, root.getChildAt(0).left)
+        controller.destroy()
+    }
+
+    @Test
+    fun `overlay attaches fixed react surface and native state owns viewport size`() {
         val controller = Robolectric.buildService(BubbleService::class.java)
         val service = controller.get()
         prepare(service)
@@ -99,15 +162,38 @@ class BubbleServiceTest {
         val root = ReflectionHelpers.getField<View?>(service, "root")
         assertNotNull(root)
         assertTrue(requireNotNull(root).isAttachedToWindow)
+        val rootGroup = requireNotNull(root) as ViewGroup
+        assertEquals(1, rootGroup.childCount)
+        assertEquals(
+            (628f * service.resources.displayMetrics.density).toInt(),
+            rootGroup.getChildAt(0).measuredWidth,
+        )
 
         val layout = params(service)
-        val originalRight = layout.x + layout.width
+        assertEquals(Gravity.LEFT, layout.gravity and Gravity.HORIZONTAL_GRAVITY_MASK)
+        assertTrue(layout.flags and WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN != 0)
+        assertTrue(layout.flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS != 0)
+        assertTrue(layout.flags and WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED != 0)
+        assertTrue(layout.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+        assertTrue(layout.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
+        assertEquals(0, layout.fitInsetsTypes)
+        assertFalse(layout.canPlayMoveAnimation())
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS,
+            layout.layoutInDisplayCutoutMode,
+        )
+        val originalWidth = layout.width
+        val originalHeight = layout.height
         window.resize?.invoke(120f, 96f)
         shadowOfMain().idle()
-        val density = service.resources.displayMetrics.density
-        assertEquals((120f * density).toInt(), params(service).width)
-        assertEquals((96f * density).toInt(), params(service).height)
-        assertEquals(originalRight, params(service).x + params(service).width)
+        assertEquals(originalWidth, params(service).width)
+        assertEquals(originalHeight, params(service).height)
+        assertEquals(84, window.geometry.value?.windowWidthDp)
+        assertEquals(84, window.geometry.value?.windowHeightDp)
+        assertEquals(628, window.geometry.value?.surfaceWidthDp)
+        assertEquals(400, window.geometry.value?.surfaceHeightDp)
+        assertEquals(272, window.geometry.value?.chipLeftDp)
+        assertEquals(260, window.geometry.value?.panelHeightDp)
 
         val beforeDrag = params(service).x
         window.move?.invoke(-24f, 10f)
@@ -168,7 +254,7 @@ class BubbleServiceTest {
         assertEquals(45, params(service).y)
         service.onConfigurationChanged(Configuration())
         shadowOfMain().idle()
-        assertTrue(params(service).x >= 8)
+        assertTrue(params(service).x >= 12)
         assertTrue(params(service).y >= 8)
 
         controller.destroy()
@@ -244,7 +330,7 @@ class BubbleServiceTest {
     }
 
     @Test
-    fun `close control region is excluded from drag interception`() {
+    fun `former close region inside the chip participates in drag interception`() {
         val controller = Robolectric.buildService(BubbleService::class.java)
         val service = controller.get()
         prepare(service)
@@ -256,7 +342,8 @@ class BubbleServiceTest {
         val move = MotionEvent.obtain(downTime, downTime + 100, MotionEvent.ACTION_MOVE, 90f, 28f, 0)
         try {
             assertFalse(root.onInterceptTouchEvent(down))
-            assertFalse(root.onInterceptTouchEvent(move))
+            assertTrue(root.onInterceptTouchEvent(move))
+            assertTrue(root.onTouchEvent(move))
         } finally {
             down.recycle()
             move.recycle()
@@ -265,7 +352,7 @@ class BubbleServiceTest {
     }
 
     @Test
-    fun `only the chip interior outside the close target starts a drag`() {
+    fun `every point inside the chip including the former close corner starts a drag`() {
         val controller = Robolectric.buildService(BubbleService::class.java)
         val service = controller.get()
         prepare(service)
@@ -273,33 +360,14 @@ class BubbleServiceTest {
         shadowOfMain().idle()
         val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
         val density = service.resources.displayMetrics.density
-        val chip = (88f * density).toInt()
-        val close = (48f * density).toInt()
-        val left = root.width - chip
+        val chip = (84f * density).toInt()
+        val left = 0
         val time = SystemClock.uptimeMillis()
-
-        val excludedDowns = listOf(
-            left - 1f to chip / 2f,
-            (left + chip / 2f) to (chip + 1f),
-            (left + chip - close / 2f) to (close / 2f),
-        )
-        excludedDowns.forEachIndexed { index, (x, y) ->
-            val down = MotionEvent.obtain(time + index * 100L, time + index * 100L, MotionEvent.ACTION_DOWN, x, y, 0)
-            val move = MotionEvent.obtain(time + index * 100L, time + index * 100L + 20, MotionEvent.ACTION_MOVE, x + 20f, y + 20f, 0)
-            try {
-                assertFalse(root.onInterceptTouchEvent(down))
-                assertFalse(root.onInterceptTouchEvent(move))
-            } finally {
-                down.recycle()
-                move.recycle()
-            }
-        }
-
-        val validX = left + chip - close - 1f
-        val validY = close + 1f
-        val down = MotionEvent.obtain(time + 500, time + 500, MotionEvent.ACTION_DOWN, validX, validY, 0)
-        val move = MotionEvent.obtain(time + 500, time + 520, MotionEvent.ACTION_MOVE, validX + 20f, validY + 20f, 0)
-        val up = MotionEvent.obtain(time + 500, time + 540, MotionEvent.ACTION_UP, validX + 20f, validY + 20f, 0)
+        val validX = left + chip - 2f
+        val validY = 2f
+        val down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, validX, validY, 0)
+        val move = MotionEvent.obtain(time, time + 20, MotionEvent.ACTION_MOVE, validX - 20f, validY + 20f, 0)
+        val up = MotionEvent.obtain(time, time + 40, MotionEvent.ACTION_UP, validX - 20f, validY + 20f, 0)
         try {
             assertFalse(root.onInterceptTouchEvent(down))
             assertTrue(root.onInterceptTouchEvent(move))
@@ -314,6 +382,38 @@ class BubbleServiceTest {
     }
 
     @Test
+    fun `dispatch drag from chip padding works when the child has no touch target`() {
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
+        val density = service.resources.displayMetrics.density
+        val startX = 80f * density
+        val startY = 80f * density
+        val time = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, startX, startY, 0)
+        val move = MotionEvent.obtain(time, time + 50, MotionEvent.ACTION_MOVE, startX - 50f, startY, 0)
+        val up = MotionEvent.obtain(time, time + 80, MotionEvent.ACTION_UP, startX - 50f, startY, 0)
+        val initialX = params(service).x
+        try {
+            assertTrue(root.dispatchTouchEvent(down))
+            assertTrue(root.dispatchTouchEvent(move))
+            shadowOfMain().idle()
+            assertTrue(params(service).x < initialX)
+            assertTrue(root.dispatchTouchEvent(up))
+            shadowOfMain().idle()
+            coVerify(exactly = 1) { preferences.setSpot(any(), any()) }
+        } finally {
+            down.recycle()
+            move.recycle()
+            up.recycle()
+            controller.destroy()
+        }
+    }
+
+    @Test
     fun `unexpanded service follows presenter expand and collapse state`() {
         val controller = Robolectric.buildService(BubbleService::class.java)
         val service = controller.get()
@@ -321,18 +421,212 @@ class BubbleServiceTest {
         controller.create()
         shadowOfMain().idle()
         val density = service.resources.displayMetrics.density
-        val bubble = (88f * density).toInt()
+        val bubble = (84f * density).toInt()
 
         state.value = state.value.copy(expanded = true)
         shadowOfMain().idle()
         assertTrue(params(service).width > bubble)
         assertEquals((260f * density).toInt(), params(service).height)
+        assertEquals(260, window.geometry.value?.panelHeightDp)
 
         state.value = state.value.copy(expanded = false)
         shadowOfMain().idle()
         assertEquals(bubble, params(service).width)
         assertEquals(bubble, params(service).height)
+        assertEquals(260, window.geometry.value?.panelHeightDp)
         controller.destroy()
+    }
+
+    @Test
+    fun `phase geometry tracks viewport height while panel metadata persists when collapsed`() {
+        state.value = BubbleUiState(expanded = true, phase = BubblePhase.Working)
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val density = service.resources.displayMetrics.density
+
+        assertEquals((requireNotNull(window.geometry.value).windowWidthDp * density).toInt(), params(service).width)
+        assertEquals((340f * density).toInt(), params(service).height)
+        assertEquals(340, window.geometry.value?.windowHeightDp)
+        assertEquals(340, window.geometry.value?.panelHeightDp)
+        val workingGeometryRevision = requireNotNull(window.geometry.value).revision
+
+        state.value = state.value.copy(percent = 50)
+        shadowOfMain().idle()
+        assertEquals(workingGeometryRevision, window.geometry.value?.revision)
+
+        state.value = state.value.copy(phase = BubblePhase.Copied)
+        shadowOfMain().idle()
+        assertEquals((400f * density).toInt(), params(service).height)
+        assertEquals(400, window.geometry.value?.windowHeightDp)
+        assertEquals(400, window.geometry.value?.panelHeightDp)
+
+        state.value = state.value.copy(expanded = false)
+        shadowOfMain().idle()
+        assertEquals((84f * density).toInt(), params(service).width)
+        assertEquals((84f * density).toInt(), params(service).height)
+        assertEquals(84, window.geometry.value?.windowHeightDp)
+        assertEquals(400, window.geometry.value?.panelHeightDp)
+
+        state.value = state.value.copy(expanded = true, phase = BubblePhase.Failed, editReady = false)
+        shadowOfMain().idle()
+        assertEquals((260f * density).toInt(), params(service).height)
+        state.value = state.value.copy(editReady = true)
+        shadowOfMain().idle()
+        assertEquals((400f * density).toInt(), params(service).height)
+
+        controller.destroy()
+    }
+
+    @Test
+    fun `collapse and expand preserve chip coordinates and geometry revisions are monotonic`() {
+        val firstController = Robolectric.buildService(BubbleService::class.java)
+        val firstService = firstController.get()
+        prepare(firstService)
+        firstController.create()
+        shadowOfMain().idle()
+        val collapsedChipX = params(firstService).x
+        val firstRevision = requireNotNull(window.geometry.value).revision
+
+        state.value = state.value.copy(expanded = true)
+        shadowOfMain().idle()
+        val visibleChipOffset = requireNotNull(window.geometry.value).windowWidthDp - 84
+        val expandedChipX = params(firstService).x + (visibleChipOffset * firstService.resources.displayMetrics.density).toInt()
+        assertEquals(collapsedChipX, expandedChipX)
+        state.value = state.value.copy(expanded = false)
+        shadowOfMain().idle()
+        assertEquals(collapsedChipX, params(firstService).x)
+
+        val activeRevision = requireNotNull(window.geometry.value).revision
+        assertTrue(activeRevision > firstRevision)
+        window.acknowledgeGeometry?.invoke(activeRevision - 1)
+        assertEquals(-1L, ReflectionHelpers.getField(firstService, "acknowledgedGeometryRevision"))
+        window.acknowledgeGeometry?.invoke(activeRevision)
+        assertEquals(activeRevision, ReflectionHelpers.getField(firstService, "acknowledgedGeometryRevision"))
+        window.acknowledgeGeometry?.invoke(firstRevision)
+        assertEquals(activeRevision, ReflectionHelpers.getField(firstService, "acknowledgedGeometryRevision"))
+
+        firstController.destroy()
+        val secondController = Robolectric.buildService(BubbleService::class.java)
+        val secondService = secondController.get()
+        prepare(secondService)
+        secondController.create()
+        shadowOfMain().idle()
+        assertTrue(requireNotNull(window.geometry.value).revision > activeRevision)
+        secondController.destroy()
+    }
+
+    @Test
+    fun `fractional drag deltas accumulate and do not emit geometry every frame`() {
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val initialX = params(service).x
+        val geometryRevision = requireNotNull(window.geometry.value).revision
+
+        repeat(10) { window.move?.invoke(-0.4f, 0f) }
+        shadowOfMain().idle()
+
+        assertEquals(initialX - 4, params(service).x)
+        assertEquals(geometryRevision, window.geometry.value?.revision)
+        controller.destroy()
+    }
+
+    @Test
+    fun `drag starts only after system touch slop`() {
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
+        val slop = ViewConfiguration.get(service).scaledTouchSlop
+        val time = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 24f, 24f, 0)
+        val belowSlop = MotionEvent.obtain(time, time + 10, MotionEvent.ACTION_MOVE, 24f + slop - 1, 24f, 0)
+        val beyondSlop = MotionEvent.obtain(time, time + 20, MotionEvent.ACTION_MOVE, 24f + slop + 1, 24f, 0)
+        try {
+            assertFalse(root.onInterceptTouchEvent(down))
+            assertFalse(root.onInterceptTouchEvent(belowSlop))
+            assertTrue(root.onInterceptTouchEvent(beyondSlop))
+            assertTrue(root.onTouchEvent(beyondSlop))
+        } finally {
+            down.recycle()
+            belowSlop.recycle()
+            beyondSlop.recycle()
+            controller.destroy()
+        }
+    }
+
+    @Test
+    fun `chip drag can intercept even when react native child disallows parent interception`() {
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
+        val time = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 24f, 24f, 0)
+        val move = MotionEvent.obtain(time, time + 20, MotionEvent.ACTION_MOVE, 48f, 24f, 0)
+        try {
+            assertFalse(root.onInterceptTouchEvent(down))
+            root.requestDisallowInterceptTouchEvent(true)
+            assertTrue(root.onInterceptTouchEvent(move))
+        } finally {
+            down.recycle()
+            move.recycle()
+            controller.destroy()
+        }
+    }
+
+    @Test
+    fun `drag keeps tracking the active pointer after its index changes`() {
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
+        val time = SystemClock.uptimeMillis()
+        val down = pointers(time, time, MotionEvent.ACTION_DOWN, intArrayOf(5), floatArrayOf(24f), floatArrayOf(24f))
+        val pointerDown = pointers(
+            time, time + 10,
+            MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+            intArrayOf(5, 9), floatArrayOf(24f, 60f), floatArrayOf(24f, 24f),
+        )
+        val pointerUp = pointers(
+            time, time + 20,
+            MotionEvent.ACTION_POINTER_UP,
+            intArrayOf(5, 9), floatArrayOf(24f, 60f), floatArrayOf(24f, 24f),
+        )
+        val move = pointers(time, time + 40, MotionEvent.ACTION_MOVE, intArrayOf(9), floatArrayOf(30f), floatArrayOf(24f))
+        val up = pointers(time, time + 60, MotionEvent.ACTION_UP, intArrayOf(9), floatArrayOf(30f), floatArrayOf(24f))
+        val initialX = params(service).x
+        try {
+            assertFalse(root.onInterceptTouchEvent(down))
+            assertTrue(root.onTouchEvent(down))
+            assertFalse(root.onInterceptTouchEvent(pointerDown))
+            assertTrue(root.onInterceptTouchEvent(pointerUp).not())
+            assertTrue(root.onInterceptTouchEvent(move))
+            assertTrue(root.onTouchEvent(move))
+            assertTrue(params(service).x < initialX)
+            assertTrue(root.onInterceptTouchEvent(up))
+            assertTrue(root.onTouchEvent(up))
+            shadowOfMain().idle()
+            coVerify(exactly = 1) { preferences.setSpot(any(), any()) }
+        } finally {
+            down.recycle()
+            pointerDown.recycle()
+            pointerUp.recycle()
+            move.recycle()
+            up.recycle()
+            controller.destroy()
+        }
     }
 
     @Test
@@ -354,7 +648,7 @@ class BubbleServiceTest {
         assertTrue(window.settle?.invoke() == false)
         shadowOfMain().idle()
         verify { presenter.setAnchorEnd(false) }
-        assertTrue(params(service).x >= 8)
+        assertTrue(params(service).x >= 12)
         coVerify(exactly = 1) { preferences.setSpot(any(), any()) }
         controller.destroy()
     }
@@ -367,10 +661,7 @@ class BubbleServiceTest {
         prepare(service)
         controller.create()
         shadowOfMain().idle()
-        // BubbleService starts at the right edge regardless of its remembered anchor;
-        // place it on the left before exercising the left-side drag target.
-        window.move?.invoke(-5000f, 0f)
-        shadowOfMain().idle()
+        // The remembered left anchor places the chip at the viewport's left edge.
         val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
         val density = service.resources.displayMetrics.density
         val initialX = params(service).x
@@ -397,7 +688,7 @@ class BubbleServiceTest {
     }
 
     @Test
-    fun `left anchored close and outside-chip zones do not start a drag`() {
+    fun `left anchored outside-chip zones do not start a drag`() {
         state.value = BubbleUiState(anchorEnd = false)
         val controller = Robolectric.buildService(BubbleService::class.java)
         val service = controller.get()
@@ -408,10 +699,9 @@ class BubbleServiceTest {
         shadowOfMain().idle()
         val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
         val density = service.resources.displayMetrics.density
-        val chip = 88f * density
-        val close = 48f * density
+        val chip = 84f * density
         val now = SystemClock.uptimeMillis()
-        val excluded = listOf((chip - close / 2f) to (close / 2f), (chip / 2f) to (chip + 1f))
+        val excluded = listOf((chip + 1f) to (chip / 2f), (chip / 2f) to (chip + 1f))
 
         excluded.forEachIndexed { index, (x, y) ->
             val time = now + index * 100L
@@ -451,6 +741,150 @@ class BubbleServiceTest {
     }
 
     @Test
+    fun `expanded chip can cross the screen and settles with the full panel inside safe bounds`() {
+        state.value = BubbleUiState(expanded = true, anchorEnd = true)
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+
+        val displayWidth = service.resources.displayMetrics.widthPixels
+        val density = service.resources.displayMetrics.density
+        val chipMinX = (12f * density).toInt()
+        val rightAnchorChipX = params(service).x + (window.geometry.value!!.windowWidthDp - 84).let { (it * density).toInt() }
+        assertTrue(rightAnchorChipX > displayWidth / 2)
+
+        repeat(8) { window.move?.invoke(-displayWidth / 8f, 0f) }
+        assertTrue(ReflectionHelpers.getField<Boolean>(service, "layoutFramePosted"))
+        assertTrue(window.settle?.invoke() == false)
+        shadowOfMain().idleFor(Duration.ofMillis(250))
+
+        val geometry = requireNotNull(window.geometry.value)
+        assertFalse(geometry.anchorEnd)
+        assertEquals(chipMinX, params(service).x)
+        assertTrue(params(service).x >= chipMinX)
+        assertTrue(params(service).x + params(service).width <= displayWidth - chipMinX)
+        controller.destroy()
+    }
+
+    @Test
+    fun `new in-bounds geometry cancels a clamp queued behind the viewport frame`() {
+        state.value = BubbleUiState(expanded = false, anchorEnd = true)
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+
+        state.value = BubbleUiState(expanded = true, anchorEnd = false)
+        shadowOfMain().idleFor(Duration.ofMillis(16))
+        assertNotNull(ReflectionHelpers.getField<Long?>(service, "pendingClampGeneration"))
+        assertNull(ReflectionHelpers.getField<android.animation.ValueAnimator?>(service, "clampAnimator"))
+
+        state.value = state.value.copy(expanded = false, anchorEnd = true)
+        shadowOfMain().idleFor(Duration.ofMillis(64))
+
+        assertNull(ReflectionHelpers.getField<Long?>(service, "pendingClampGeneration"))
+        assertNull(ReflectionHelpers.getField<android.animation.ValueAnimator?>(service, "clampAnimator"))
+        assertTrue(requireNotNull(window.geometry.value).anchorEnd)
+        controller.destroy()
+    }
+
+    @Test
+    fun `hardware clamp starts only after the viewport frame commit and ignores stale commits`() {
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
+
+        ReflectionHelpers.setField(service, "preciseY", 10_000f)
+        params(service).y = 10_000
+        state.value = BubbleUiState(expanded = true, anchorEnd = false)
+        shadowOfMain().idleFor(Duration.ofMillis(48))
+
+        assertEquals(params(service).width, root.width)
+        assertEquals(params(service).height, root.height)
+        assertNotNull(ReflectionHelpers.getField<Long?>(service, "pendingClampGeneration"))
+        assertNull(ReflectionHelpers.getField<android.animation.ValueAnimator?>(service, "clampAnimator"))
+        val callbacks = ReflectionHelpers.callInstanceMethod<ArrayList<Runnable>>(
+            root.viewTreeObserver,
+            "captureFrameCommitCallbacks",
+        )
+        assertNotNull(callbacks)
+        assertFalse(requireNotNull(callbacks).isEmpty())
+        val committedFrame = requireNotNull(callbacks).first()
+
+        committedFrame.run()
+        shadowOfMain().idle()
+        assertNotNull(ReflectionHelpers.getField<android.animation.ValueAnimator?>(service, "clampAnimator"))
+
+        val time = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 24f, 24f, 0)
+        try {
+            root.onInterceptTouchEvent(down)
+            assertNull(ReflectionHelpers.getField<android.animation.ValueAnimator?>(service, "clampAnimator"))
+            committedFrame.run()
+            shadowOfMain().idle()
+            assertNull(ReflectionHelpers.getField<android.animation.ValueAnimator?>(service, "clampAnimator"))
+        } finally {
+            down.recycle()
+        }
+        controller.destroy()
+    }
+
+    @Test
+    fun `surface translation waits for the native viewport layout on resize and anchor change`() {
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
+        val surfaceView = root.getChildAt(0)
+        val density = service.resources.displayMetrics.density
+        val collapsedWidth = root.width
+        val collapsedTranslation = surfaceView.translationX
+
+        state.value = BubbleUiState(expanded = true, anchorEnd = true)
+        assertEquals(collapsedTranslation, surfaceView.translationX)
+        assertEquals(collapsedWidth, root.width)
+        assertChipDownTracks(root, 24f * density, 24f * density)
+        shadowOfMain().idleFor(Duration.ofMillis(250))
+
+        val expandedWidth = root.width
+        val rightTranslation = ((requireNotNull(window.geometry.value).windowWidthDp - 84 - 272) * density)
+        assertTrue(expandedWidth > collapsedWidth)
+        assertEquals(rightTranslation, surfaceView.translationX)
+        assertChipDownTracks(root, expandedWidth - 42f * density, 42f * density)
+
+        state.value = state.value.copy(anchorEnd = false)
+        assertEquals(rightTranslation, surfaceView.translationX)
+        shadowOfMain().idleFor(Duration.ofMillis(250))
+
+        assertEquals(expandedWidth, root.width)
+        assertEquals(-272f * density, surfaceView.translationX)
+        controller.destroy()
+    }
+
+    private fun assertChipDownTracks(root: ViewGroup, x: Float, y: Float) {
+        val now = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0)
+        val cancel = MotionEvent.obtain(now, now + 1, MotionEvent.ACTION_CANCEL, x, y, 0)
+        try {
+            root.onInterceptTouchEvent(down)
+            assertTrue(ReflectionHelpers.getField<Boolean>(root, "tracking"))
+            root.onInterceptTouchEvent(cancel)
+            assertFalse(ReflectionHelpers.getField<Boolean>(root, "tracking"))
+        } finally {
+            down.recycle()
+            cancel.recycle()
+        }
+    }
+
+    @Test
     fun `cancelled small movement does not turn a tap into an overlay drag`() {
         val controller = Robolectric.buildService(BubbleService::class.java)
         val service = controller.get()
@@ -467,7 +901,7 @@ class BubbleServiceTest {
         try {
             assertFalse(root.onInterceptTouchEvent(down))
             assertFalse(root.onInterceptTouchEvent(smallMove))
-            assertFalse(root.onTouchEvent(smallMove))
+            assertTrue(root.onTouchEvent(smallMove))
             assertFalse(root.onInterceptTouchEvent(cancel))
             assertFalse(root.onInterceptTouchEvent(laterMove))
             assertTrue(root.dispatchTouchEvent(outside))
@@ -530,7 +964,7 @@ class BubbleServiceTest {
     }
 
     @Test
-    fun `window callbacks posted from worker thread update on main looper`() {
+    fun `legacy resize callback posted from worker thread cannot override native viewport`() {
         val controller = Robolectric.buildService(BubbleService::class.java)
         val service = controller.get()
         prepare(service)
@@ -543,7 +977,7 @@ class BubbleServiceTest {
         worker.join()
         shadowOfMain().idle()
 
-        assertTrue(params(service).width > originalWidth)
+        assertEquals(originalWidth, params(service).width)
         controller.destroy()
     }
 
@@ -557,15 +991,117 @@ class BubbleServiceTest {
         shadowOfMain().idle()
 
         assertNotNull(window.move)
-        assertTrue(params(service).x >= 8)
+        assertTrue(params(service).flags and WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN != 0)
+        assertTrue(params(service).flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS != 0)
+        assertEquals(
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT,
+            params(service).layoutInDisplayCutoutMode,
+        )
+        assertTrue(params(service).x >= 12)
         assertTrue(params(service).y >= 8)
         window.resize?.invoke(120f, 96f)
         shadowOfMain().idle()
-        assertTrue(params(service).width >= (120f * service.resources.displayMetrics.density).toInt())
+        assertEquals((84f * service.resources.displayMetrics.density).toInt(), params(service).width)
         service.onConfigurationChanged(Configuration())
         shadowOfMain().idle()
         controller.destroy()
         assertNull(window.move)
+    }
+
+    @Test
+    @Config(sdk = [28])
+    fun `chip down interrupts clamp before slop while panel down leaves it running`() {
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val root = requireNotNull(ReflectionHelpers.getField<View?>(service, "root")) as ViewGroup
+
+        ReflectionHelpers.setField(service, "preciseY", 10_000f)
+        params(service).y = 10_000
+        state.value = BubbleUiState(expanded = true, anchorEnd = false)
+        shadowOfMain().idleFor(Duration.ofMillis(64))
+        assertEquals(params(service).width, root.width)
+        assertEquals(params(service).height, root.height)
+        val animator = ReflectionHelpers.getField<android.animation.ValueAnimator?>(service, "clampAnimator")
+        assertNotNull(animator)
+
+        val time = SystemClock.uptimeMillis()
+        val panelDown = MotionEvent.obtain(time, time, MotionEvent.ACTION_DOWN, 140f, 50f, 0)
+        val panelUp = MotionEvent.obtain(time, time + 10, MotionEvent.ACTION_UP, 140f, 50f, 0)
+        val chipDown = MotionEvent.obtain(time + 20, time + 20, MotionEvent.ACTION_DOWN, 24f, 24f, 0)
+        val chipUp = MotionEvent.obtain(time + 30, time + 30, MotionEvent.ACTION_UP, 24f, 24f, 0)
+        try {
+            assertFalse(root.onInterceptTouchEvent(panelDown))
+            assertSame(animator, ReflectionHelpers.getField<android.animation.ValueAnimator?>(service, "clampAnimator"))
+            assertFalse(root.onInterceptTouchEvent(panelUp))
+
+            val xAtPress = ReflectionHelpers.getField<Float>(service, "preciseX")
+            val yAtPress = ReflectionHelpers.getField<Float>(service, "preciseY")
+            assertFalse(root.onInterceptTouchEvent(chipDown))
+            assertNull(ReflectionHelpers.getField<android.animation.ValueAnimator?>(service, "clampAnimator"))
+            assertTrue(root.onTouchEvent(chipDown))
+            assertTrue(root.onTouchEvent(chipUp))
+            shadowOfMain().idleFor(Duration.ofMillis(250))
+
+            assertEquals(xAtPress, ReflectionHelpers.getField<Float>(service, "preciseX"))
+            assertEquals(yAtPress, ReflectionHelpers.getField<Float>(service, "preciseY"))
+            coVerify(exactly = 0) { preferences.setSpot(any(), any()) }
+        } finally {
+            panelDown.recycle()
+            panelUp.recycle()
+            chipDown.recycle()
+            chipUp.recycle()
+            controller.destroy()
+        }
+    }
+
+    @Test
+    fun `manual safe inset clamp keeps expanded panel within nonzero system bar bounds`() {
+        val controller = Robolectric.buildService(BubbleService::class.java)
+        val service = controller.get()
+        prepare(service)
+        controller.create()
+        shadowOfMain().idle()
+        val realWindowManager = ReflectionHelpers.getField<WindowManager>(service, "windowManager")
+        val density = service.resources.displayMetrics.density
+        val bounds = Rect(0, 0, (800 * density).toInt(), (1000 * density).toInt())
+        val systemBars = WindowInsets.Type.systemBars()
+        val safeInsets = Insets.of(
+            (20 * density).toInt(),
+            (40 * density).toInt(),
+            (30 * density).toInt(),
+            (60 * density).toInt(),
+        )
+        val insets = WindowInsets.Builder()
+            .setInsets(systemBars, safeInsets)
+            .setInsetsIgnoringVisibility(systemBars, safeInsets)
+            .setVisible(systemBars, true)
+            .build()
+        val measuredWindowManager = mockk<WindowManager>(relaxed = true)
+        every { measuredWindowManager.currentWindowMetrics } returns WindowMetrics(bounds, insets, density)
+        ReflectionHelpers.setField(service, "windowManager", measuredWindowManager)
+
+        try {
+            state.value = BubbleUiState(expanded = true, phase = BubblePhase.Copied, anchorEnd = false)
+            shadowOfMain().idleFor(Duration.ofMillis(250))
+            ReflectionHelpers.setField(service, "preciseX", bounds.right.toFloat())
+            ReflectionHelpers.setField(service, "preciseY", bounds.bottom.toFloat())
+            service.onConfigurationChanged(Configuration())
+            shadowOfMain().idleFor(Duration.ofMillis(250))
+
+            val expectedMaxX = bounds.right - safeInsets.right - (12 * density).toInt() - params(service).width
+            val expectedMaxY = bounds.bottom - safeInsets.bottom - (12 * density).toInt() - params(service).height
+            assertEquals(expectedMaxX, params(service).x)
+            assertEquals(expectedMaxX, ReflectionHelpers.getField<Float>(service, "preciseX").toInt())
+            assertEquals(expectedMaxY, ReflectionHelpers.getField<Float>(service, "preciseY").toInt())
+            assertTrue(params(service).y >= (40 * density).toInt() + (12 * density).toInt())
+            assertEquals(0, params(service).fitInsetsTypes)
+        } finally {
+            ReflectionHelpers.setField(service, "windowManager", realWindowManager)
+            controller.destroy()
+        }
     }
 
     private fun shadowOfMain() = org.robolectric.Shadows.shadowOf(Looper.getMainLooper())

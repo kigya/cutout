@@ -309,6 +309,8 @@ const mockErase = {
   setLocale: jest.fn(async () => undefined),
   restart: jest.fn(async () => undefined),
   consumePendingEdit: jest.fn(async () => null),
+  getBubbleGeometry: jest.fn(async () => null),
+  ackBubbleGeometry: jest.fn(),
   moveBubble: jest.fn(),
   settleBubble: jest.fn(async () => true),
   setBubbleSize: jest.fn(),
