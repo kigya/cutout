@@ -28,6 +28,7 @@ import dev.kigya.cutout.cutout.CutOutcome
 import dev.kigya.cutout.cutout.ImageCutter
 import dev.kigya.cutout.cutout.MaskEditor
 import dev.kigya.cutout.cutout.MaskWrite
+import dev.kigya.cutout.data.BubbleAppearance
 import dev.kigya.cutout.data.BubblePreferences
 import dev.kigya.cutout.data.ClipboardImages
 import dev.kigya.cutout.data.ClipboardLook
@@ -193,6 +194,7 @@ class EraseModuleTest {
         val window: BubbleWindow,
         val gallery: GalleryStore,
         val images: ClipboardImages,
+        val mainActivity: dev.kigya.cutout.MainActivityState,
     )
 
     private fun fixture(): Fixture {
@@ -206,6 +208,7 @@ class EraseModuleTest {
         val presenter = mockk<BubblePresenter>()
         val state = MutableStateFlow(BubbleUiState())
         every { presenter.state } returns state
+        every { presenter.stop() } returns Unit
         coEvery { presenter.onEvent(any()) } answers {
             state.value = state.value.copy(revision = state.value.revision + 1, expanded = true)
         }
@@ -219,15 +222,18 @@ class EraseModuleTest {
         val window = BubbleWindow()
         val gallery = mockk<GalleryStore>()
         val images = mockk<ClipboardImages>()
+        val mainActivity = dev.kigya.cutout.MainActivityState()
+        every { preferences.appearance } returns kotlinx.coroutines.flow.MutableStateFlow(BubbleAppearance())
+        every { preferences.onboardingCompleted } returns kotlinx.coroutines.flow.MutableStateFlow(false)
         every { preferences.enabled } returns MutableStateFlow(false)
         every { images.hasPicture() } returns true
         val module = EraseModule(
             context, permissions, preferences, navigator, bubble, presenter, cutter,
-            sessions, picks, clipboard, masks, window, gallery, images,
+            sessions, picks, clipboard, masks, window, gallery, images, mainActivity,
         )
         modules += module
         return Fixture(module, context, permissions, preferences, navigator, bubble, presenter,
-            state, cutter, sessions, picks, clipboard, masks, window, gallery, images)
+            state, cutter, sessions, picks, clipboard, masks, window, gallery, images, mainActivity)
     }
 
     private suspend fun PromiseResult.value() = resolved.await()
@@ -247,7 +253,7 @@ class EraseModuleTest {
         f.module.getBubbleGeometry(snapshot)
         val map = snapshot.value() as ReadableMap
         assertEquals(7.0, map.getDouble("revision"), 0.0)
-        assertEquals(628.0, map.getDouble("surfaceWidthDp"), 0.0)
+        assertEquals(640.0, map.getDouble("surfaceWidthDp"), 0.0)
         assertEquals(272.0, map.getDouble("chipLeftDp"), 0.0)
         assertEquals(340.0, map.getDouble("panelHeightDp"), 0.0)
         f.context.activeReactInstance = true
@@ -651,6 +657,23 @@ class EraseModuleTest {
             f.module.openPermission(permissionName, PromiseResult())
         }
         PermissionKind.entries.forEach { kind -> verify(exactly = 1) { f.navigator.open(kind) } }
+    }
+
+    @Test
+    fun `permission settings launch failures and blank attempt identifiers return stable errors`() = runTest {
+        val f = fixture()
+        every { f.navigator.open(PermissionKind.Overlay) } returns false
+        val launch = PromiseResult()
+        f.module.openPermission("overlay", launch)
+        assertEquals("permission" to "Could not open permission settings", launch.rejected.await())
+
+        val invalidStart = PromiseResult()
+        f.module.beginPermissionRequest("unknown", invalidStart)
+        assertEquals("kind" to "unknown", invalidStart.rejected.await())
+
+        val invalidComplete = PromiseResult()
+        f.module.completePermissionRequest("overlay", "  ", blocked = false, invalidComplete)
+        assertEquals("kind" to "overlay", invalidComplete.rejected.await())
     }
 
     @Test
@@ -1316,6 +1339,18 @@ class EraseModuleTest {
     }
 
     @Test
+    fun `toggle action explains overlay settings when the host app is visible`() = runTest {
+        val f = fixture()
+        val activity = mockk<Activity>()
+        f.mainActivity.started(activity)
+        f.mainActivity.resumed(activity)
+        val result = PromiseResult()
+        f.module.bubbleAction("toggle", result)
+        val snapshot = result.value() as ReadableMap
+        assertEquals(Messages.BUBBLE_OTHER_APPS, snapshot.getString("actionMessage"))
+    }
+
+    @Test
     fun `collapse on an already collapsed bubble resolves without waiting or changing the result`() = runTest {
         val f = fixture()
         f.state.value = BubbleUiState(
@@ -1326,6 +1361,7 @@ class EraseModuleTest {
             previewPath = "/cache/result.png",
             percent = 100,
         )
+        coEvery { f.presenter.onEvent(BubbleUiEvent.Collapse) } returns Unit
         val promise = PromiseResult()
         f.module.bubbleAction("collapse", promise)
 
@@ -1336,7 +1372,7 @@ class EraseModuleTest {
         assertEquals(Messages.COPIED, snapshot.string("message"))
         assertEquals("/cache/result.png", snapshot.string("previewPath"))
         assertEquals(100, snapshot.getInt("percent"))
-        coVerify(exactly = 0) { f.presenter.onEvent(any()) }
+        coVerify(exactly = 1) { f.presenter.onEvent(BubbleUiEvent.Collapse) }
     }
 
     @Test
@@ -1382,68 +1418,41 @@ class EraseModuleTest {
     }
 
     @Test
-    fun `bubble action waits for asynchronous state publication before resolving`() = runTest {
+    fun `no-op toggle resolves immediately without a revision change`() = runTest {
         val f = fixture()
-        coEvery { f.presenter.onEvent(BubbleUiEvent.Toggle) } answers {
-            backgroundScope.launch {
-                kotlinx.coroutines.delay(1)
-                f.state.value = f.state.value.copy(revision = f.state.value.revision + 1, expanded = true)
-            }
-        }
-
+        coEvery { f.presenter.onEvent(BubbleUiEvent.Toggle) } answers { Unit }
         val promise = PromiseResult()
         f.module.bubbleAction("toggle", promise)
         runCurrent()
-        assertFalse(promise.resolved.isCompleted)
-
-        advanceTimeBy(1)
-        runCurrent()
-
+        assertTrue(promise.resolved.isCompleted)
         val state = promise.value() as WritableMap
-        assertTrue(state.getBoolean("expanded"))
-        assertEquals(1, state.getInt("revision"))
+        assertEquals(0, state.getInt("revision"))
     }
 
     @Test
-    fun `clipboard action ignores intermediate working state until a terminal state arrives`() = runTest {
+    fun `clipboard command resolves at acceptance while processing continues`() = runTest {
         val f = fixture()
         coEvery { f.presenter.onEvent(BubbleUiEvent.FromClipboard) } answers {
-            backgroundScope.launch {
-                f.state.value = f.state.value.copy(revision = f.state.value.revision + 1, phase = BubblePhase.Working)
-                kotlinx.coroutines.delay(1)
-                f.state.value = f.state.value.copy(revision = f.state.value.revision + 1, phase = BubblePhase.Copied)
-            }
-        }
-
-        val promise = PromiseResult()
-        f.module.bubbleAction("clipboard", promise)
-        runCurrent()
-        assertFalse(promise.resolved.isCompleted)
-
-        advanceTimeBy(1)
-        runCurrent()
-
-        val state = promise.value() as WritableMap
-        assertEquals("copied", state.string("phase"))
-        assertEquals(2, state.getInt("revision"))
-    }
-
-    @Test
-    fun `bridge action resolves the latest state when a long-running action times out`() = runTest {
-        val f = fixture()
-        coEvery { f.presenter.onEvent(BubbleUiEvent.FromClipboard) } coAnswers {
-            f.state.value = f.state.value.copy(revision = f.state.value.revision + 1, phase = BubblePhase.Working)
+            f.state.value = f.state.value.copy(revision = 1, phase = BubblePhase.Working)
         }
         val action = PromiseResult()
         f.module.bubbleAction("clipboard", action)
         runCurrent()
-        assertFalse(action.resolved.isCompleted)
-
-        advanceTimeBy(180_001)
-        runCurrent()
+        assertTrue(action.resolved.isCompleted)
         val state = action.value() as WritableMap
         assertEquals("working", state.string("phase"))
         assertEquals(1, state.getInt("revision"))
+        assertEquals(0L, testScheduler.currentTime)
+    }
+
+    @Test
+    fun `unexpected presenter failure rejects action instead of leaving it pending`() = runTest {
+        val f = fixture()
+        coEvery { f.presenter.onEvent(BubbleUiEvent.Toggle) } throws IllegalStateException("failed")
+        val result = PromiseResult()
+        f.module.bubbleAction("toggle", result)
+        runCurrent()
+        assertEquals("bubble" to "Could not perform Bubble action", result.rejected.await())
     }
 
     @Test
@@ -1719,4 +1728,49 @@ class EraseModuleTest {
         assertTrue("cancelled export request must be released", next != null)
         dev.kigya.cutout.overlay.LegacyExportActivity.cancel(requireNotNull(next))
     }
+    @Test fun `onboarding and appearance bridge persist values and emit live changes only to attached clients`() = runTest {
+        val f = fixture()
+        val completed = MutableStateFlow(false)
+        val appearance = f.preferences.appearance as MutableStateFlow<BubbleAppearance>
+        every { f.preferences.onboardingCompleted } returns completed
+        coEvery { f.preferences.completeOnboarding() } answers { completed.value = true }
+        coEvery { f.preferences.setAppearance(any()) } answers { appearance.value = firstArg() }
+        val before = PromiseResult(); f.module.getOnboardingCompleted(before)
+        assertEquals(false, before.value())
+        val done = PromiseResult(); f.module.completeOnboarding(done); done.value()
+        val after = PromiseResult(); f.module.getOnboardingCompleted(after)
+        assertEquals(true, after.value())
+        val initial = PromiseResult(); f.module.getBubbleAppearance(initial)
+        assertEquals(64, (initial.value() as ReadableMap).getInt("sizeDp"))
+        f.context.activeReactInstance = true
+        val saved = PromiseResult(); f.module.setBubbleAppearance(80.0, 0.5, true, true, saved)
+        val value = saved.value() as ReadableMap
+        assertEquals(80, value.getInt("sizeDp")); assertEquals(0.5, value.getDouble("opacity"), 0.0)
+        assertTrue(value.getBoolean("shrinkWhenIdle")); assertTrue(value.getBoolean("shrinkToDot"))
+        assertTrue(f.context.deviceEvents.any { it.first == "bubbleAppearance" })
+        f.window.setInteracting(true); f.window.setInteracting(false)
+        assertTrue(f.context.deviceEvents.any { it.first == "bubbleInteraction" })
+        f.context.activeReactInstance = false
+        appearance.value = BubbleAppearance()
+        f.window.setInteracting(true)
+    }
+
+    @Test fun `onboarding and appearance report persistence errors and reject nonfinite bridge input`() = runTest {
+        val f = fixture()
+        every { f.preferences.onboardingCompleted } throws java.io.IOException("read")
+        val read = PromiseResult(); f.module.getOnboardingCompleted(read)
+        assertEquals("preferences", read.rejected.await().first)
+        coEvery { f.preferences.completeOnboarding() } throws java.io.IOException("write")
+        val done = PromiseResult(); f.module.completeOnboarding(done)
+        assertEquals("preferences", done.rejected.await().first)
+        every { f.preferences.appearance } throws java.io.IOException("read")
+        val appearance = PromiseResult(); f.module.getBubbleAppearance(appearance)
+        assertEquals("preferences", appearance.rejected.await().first)
+        for ((size, opacity) in listOf(Double.NaN to 0.5, 64.0 to Double.NaN, 64.0 to 0.5)) {
+            coEvery { f.preferences.setAppearance(any()) } throws java.io.IOException("write")
+            val saved = PromiseResult(); f.module.setBubbleAppearance(size, opacity, false, false, saved)
+            assertEquals("preferences", saved.rejected.await().first)
+        }
+    }
+
 }

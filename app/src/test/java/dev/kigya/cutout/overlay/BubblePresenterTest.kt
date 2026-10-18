@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import dev.kigya.cutout.MainActivity
+import dev.kigya.cutout.MainActivityState
 import dev.kigya.cutout.cutout.CutListener
 import dev.kigya.cutout.cutout.CutOutcome
 import dev.kigya.cutout.cutout.ImageCutter
@@ -51,13 +52,17 @@ import org.robolectric.annotation.Config
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class BubblePresenterTest {
     private lateinit var dispatcher: TestDispatcher
+    private val presenters = mutableListOf<BubblePresenter>()
 
     @Before fun setUp() {
         dispatcher = UnconfinedTestDispatcher()
         Dispatchers.setMain(dispatcher)
     }
 
-    @After fun tearDown() { Dispatchers.resetMain() }
+    @After fun tearDown() {
+        presenters.forEach(BubblePresenter::stop)
+        Dispatchers.resetMain()
+    }
 
     private data class Fixture(
         val presenter: BubblePresenter,
@@ -67,6 +72,7 @@ class BubblePresenterTest {
         val picks: PickBus,
         val reads: ClipboardBus,
         val images: ClipboardImages,
+        val mainActivity: MainActivityState,
     )
 
     private class RecordingContext(base: Context, private val failure: Exception? = null) : ContextWrapper(base) {
@@ -88,12 +94,108 @@ class BubblePresenterTest {
         val images = mockk<ClipboardImages>()
         every { images.hasPicture() } returns hasPicture
         every { sessions.pending } returns null
-        val presenter = BubblePresenter(context, cutter, sessions, picks, reads, images)
-        return Fixture(presenter, context, cutter, sessions, picks, reads, images)
+        val mainActivity = MainActivityState()
+        val presenter = BubblePresenter(context, cutter, sessions, picks, reads, images, mainActivity)
+        presenters += presenter
+        presenter.start()
+        return Fixture(presenter, context, cutter, sessions, picks, reads, images, mainActivity)
+    }
+
+    @Test
+    fun `default Activity state supports a standalone presenter`() = runTest {
+        val presenter = BubblePresenter(
+            RuntimeEnvironment.getApplication(),
+            mockk(),
+            mockk(relaxed = true),
+            PickBus(),
+            ClipboardBus(),
+            mockk<ClipboardImages> { every { hasPicture() } returns false },
+        )
+        presenters += presenter
+
+        presenter.start()
+        presenter.onEvent(BubbleUiEvent.Toggle)
+
+        assertTrue(presenter.state.value.expanded)
+        assertTrue(presenter.state.value.clipboardReady)
+    }
+
+    private fun Fixture.pick(image: IncomingImage) {
+        presenter.onEvent(BubbleUiEvent.FromGallery)
+        picks.offer(image, PickBus.TARGET_BUBBLE, picks.bubbleRequestId)
     }
 
     private suspend fun Fixture.awaitState(predicate: (BubbleUiState) -> Boolean) = withContext(Dispatchers.IO) {
         withTimeout(5.seconds) { presenter.state.first(predicate) }
+    }
+
+    @Test
+    fun `main Activity boundaries collapse panel and prohibit in-app expansion`() = runTest {
+        val f = fixture()
+        val activity = android.app.Activity()
+        f.presenter.onEvent(BubbleUiEvent.Toggle)
+        assertTrue(f.presenter.state.value.expanded)
+        f.mainActivity.started(activity)
+        runCurrent()
+        assertFalse(f.presenter.state.value.expanded)
+        f.presenter.onEvent(BubbleUiEvent.Toggle)
+        assertFalse(f.presenter.state.value.expanded)
+        assertNull(f.presenter.state.value.message)
+        f.mainActivity.stopped(activity)
+        runCurrent()
+        assertFalse(f.presenter.state.value.expanded)
+        f.presenter.onEvent(BubbleUiEvent.Toggle)
+        assertTrue(f.presenter.state.value.expanded)
+        assertNull(f.presenter.state.value.message)
+    }
+
+    @Test
+    fun `return during processing keeps its result collapsed and available outside`() = runTest {
+        val f = fixture()
+        val activity = android.app.Activity()
+        val began = CompletableDeferred<Unit>()
+        val finish = CompletableDeferred<CutOutcome>()
+        coEvery { f.cutter.cut(any(), any()) } coAnswers { began.complete(Unit); finish.await() }
+        f.pick(IncomingImage.Svg("<svg/>"))
+        began.await()
+        f.mainActivity.started(activity)
+        runCurrent()
+        assertFalse(f.presenter.state.value.expanded)
+        finish.complete(CutOutcome.CopiedRaster(Messages.COPIED, "/result.png", EditFiles("/source.png", "/result.png", 2, 2), false))
+        f.awaitState { it.phase == BubblePhase.Copied }
+        assertFalse(f.presenter.state.value.expanded)
+        assertEquals("/result.png", f.presenter.state.value.previewPath)
+        f.mainActivity.stopped(activity)
+        runCurrent()
+        assertFalse(f.presenter.state.value.expanded)
+        f.presenter.onEvent(BubbleUiEvent.Toggle)
+        assertTrue(f.presenter.state.value.expanded)
+        assertEquals("/result.png", f.presenter.state.value.previewPath)
+    }
+
+    @Test
+    fun `collapse and stop discard late clipboard reads and reopening allows a retry`() = runTest {
+        val f = fixture()
+        f.presenter.onEvent(BubbleUiEvent.Toggle)
+        f.presenter.onEvent(BubbleUiEvent.FromClipboard)
+        val stale = f.reads.bubbleRequestId
+        f.presenter.collapse()
+        f.reads.offer(ClipboardRead(ClipboardLook.Found(IncomingImage.Svg("stale")), true, stale))
+        runCurrent()
+        assertFalse(f.presenter.state.value.readingClipboard)
+        coVerify(exactly = 0) { f.cutter.cut(any(), any()) }
+        f.presenter.onEvent(BubbleUiEvent.Toggle)
+        f.presenter.onEvent(BubbleUiEvent.FromClipboard)
+        f.reads.offer(ClipboardRead(ClipboardLook.NoFocus, true, f.reads.bubbleRequestId))
+        runCurrent()
+        assertEquals(Messages.CLIPBOARD_NO_FOCUS, f.presenter.state.value.message)
+        assertFalse(f.presenter.state.value.readingClipboard)
+        f.presenter.onEvent(BubbleUiEvent.FromClipboard)
+        assertTrue(f.presenter.state.value.readingClipboard)
+        f.presenter.stop()
+        f.presenter.onEvent(BubbleUiEvent.Toggle)
+        assertFalse(f.presenter.state.value.expanded)
+        assertNull(f.reads.bubbleRequestId)
     }
 
     @Test
@@ -126,7 +228,7 @@ class BubblePresenterTest {
         every { f.images.hasPicture() } throws IllegalStateException("clipboard service unavailable")
         f.presenter.onEvent(BubbleUiEvent.Toggle)
         assertTrue(f.presenter.state.value.expanded)
-        assertFalse(f.presenter.state.value.clipboardReady)
+        assertTrue(f.presenter.state.value.clipboardReady)
         assertEquals(BubblePhase.Idle, f.presenter.state.value.phase)
     }
 
@@ -144,7 +246,7 @@ class BubblePresenterTest {
             edit = EditFiles("/cache/original.png", "/cache/result.png", 2, 2),
             rasterizedSvg = false,
         )
-        f.picks.offer(IncomingImage.Raster(byteArrayOf(1)), PickBus.TARGET_BUBBLE)
+        f.pick(IncomingImage.Raster(byteArrayOf(1)))
         f.awaitState { it.phase == BubblePhase.Copied }
         val result = f.presenter.state.value
         f.presenter.onEvent(BubbleUiEvent.Collapse)
@@ -199,6 +301,41 @@ class BubblePresenterTest {
     }
 
     @Test
+    fun `cancelled gallery request returns to a visible failed state`() = runTest {
+        val f = fixture(RecordingContext(RuntimeEnvironment.getApplication()))
+        f.presenter.onEvent(BubbleUiEvent.FromGallery)
+        val requestId = requireNotNull(f.picks.bubbleRequestId)
+
+        f.picks.cancel(PickBus.TARGET_BUBBLE, requestId)
+        runCurrent()
+
+        assertEquals(BubblePhase.Failed, f.presenter.state.value.phase)
+        assertTrue(f.presenter.state.value.expanded)
+        assertFalse(f.presenter.state.value.readingClipboard)
+        assertNull(f.presenter.state.value.message)
+    }
+
+    @Test
+    fun `clipboard timeout and unreadable results report distinct recovery messages`() = runTest {
+        val context = RecordingContext(RuntimeEnvironment.getApplication())
+        val f = fixture(context)
+        f.presenter.onEvent(BubbleUiEvent.FromClipboard)
+
+        dispatcher.scheduler.advanceTimeBy(5_001)
+        dispatcher.scheduler.runCurrent()
+        assertEquals(Messages.CLIPBOARD_NO_FOCUS, f.presenter.state.value.message)
+        assertFalse(f.presenter.state.value.readingClipboard)
+
+        f.presenter.onEvent(BubbleUiEvent.FromClipboard)
+        f.reads.offer(ClipboardRead(ClipboardLook.Unreadable, consume = true, requestId = f.reads.bubbleRequestId))
+        runCurrent()
+        assertEquals(BubblePhase.Failed, f.presenter.state.value.phase)
+        assertEquals(Messages.READ_FAILED, f.presenter.state.value.message)
+        assertFalse(f.presenter.state.value.clipboardReady)
+        assertEquals(2, context.started.size)
+    }
+
+    @Test
     fun `gallery and file actions launch their picker modes for the bubble`() = runTest {
         val context = RecordingContext(RuntimeEnvironment.getApplication())
         val f = fixture(context)
@@ -210,6 +347,7 @@ class BubblePresenterTest {
         assertFalse(f.presenter.state.value.expanded)
         assertNull(f.presenter.state.value.message)
 
+        f.presenter.collapse()
         f.presenter.onEvent(BubbleUiEvent.FromFile)
         val file = context.started.last()
         assertEquals(PickerActivity.MODE_FILE, file.getStringExtra(PickerActivity.EXTRA_MODE))
@@ -235,70 +373,29 @@ class BubblePresenterTest {
     }
 
     @Test
-    fun `clipboard empty unreadable found peek and canceled picker preserve intended state`() = runTest {
+    fun `unrequested clipboard events cannot alter the bubble`() = runTest {
         val f = fixture()
         f.presenter.onEvent(BubbleUiEvent.Toggle)
-        f.reads.offer(ClipboardRead(ClipboardLook.Empty, consume = false))
-        runCurrent()
-        assertFalse(f.presenter.state.value.readingClipboard)
-        assertFalse(f.presenter.state.value.clipboardReady)
-        assertEquals(BubblePhase.Idle, f.presenter.state.value.phase)
-
-        f.reads.offer(ClipboardRead(ClipboardLook.Found(IncomingImage.Invalid("idle peek")), consume = false))
-        runCurrent()
-        assertTrue(f.presenter.state.value.clipboardReady)
-        assertEquals(BubblePhase.Idle, f.presenter.state.value.phase)
-
+        val before = f.presenter.state.value
         f.reads.offer(ClipboardRead(ClipboardLook.Unreadable, consume = false))
         runCurrent()
-        assertEquals(BubblePhase.Failed, f.presenter.state.value.phase)
-        assertEquals(Messages.READ_FAILED, f.presenter.state.value.message)
-        f.presenter.onEvent(BubbleUiEvent.Dismiss)
-        f.presenter.onEvent(BubbleUiEvent.Toggle)
-        assertTrue(f.presenter.state.value.expanded)
-        assertEquals(BubblePhase.Failed, f.presenter.state.value.phase)
-        assertEquals(Messages.READ_FAILED, f.presenter.state.value.message)
-        f.reads.offer(ClipboardRead(ClipboardLook.Found(IncomingImage.Invalid("peek")), consume = false))
-        runCurrent()
-        assertEquals(BubblePhase.Idle, f.presenter.state.value.phase)
-        assertNull(f.presenter.state.value.message)
-        f.picks.cancel(PickBus.TARGET_BUBBLE)
-        runCurrent()
-        assertEquals(BubblePhase.Failed, f.presenter.state.value.phase)
-        assertNull(f.presenter.state.value.message)
-        assertTrue(f.presenter.state.value.expanded)
+        assertEquals(before, f.presenter.state.value)
+        verify(exactly = 0) { f.images.hasPicture() }
     }
 
     @Test
-    fun `picker result can replace a pending clipboard probe without a second cut`() = runTest {
+    fun `collapse cancels clipboard before a new picker request`() = runTest {
         val context = RecordingContext(RuntimeEnvironment.getApplication())
         val f = fixture(context)
         coEvery { f.cutter.cut(any(), any()) } returns CutOutcome.CopiedSvg(Messages.COPIED)
-
         f.presenter.onEvent(BubbleUiEvent.FromClipboard)
-        assertTrue(f.presenter.state.value.readingClipboard)
-        f.presenter.onEvent(BubbleUiEvent.FromGallery)
-        assertFalse(f.presenter.state.value.readingClipboard)
-        f.picks.offer(IncomingImage.Svg("<svg/>"), PickBus.TARGET_BUBBLE)
+        val stale = f.reads.bubbleRequestId
+        f.presenter.collapse()
+        f.pick(IncomingImage.Svg("<svg/>"))
+        f.reads.offer(ClipboardRead(ClipboardLook.Found(IncomingImage.Svg("stale")), true, stale))
         f.awaitState { it.phase == BubblePhase.Copied }
-
         assertEquals(Messages.COPIED, f.presenter.state.value.message)
-        assertEquals(2, context.started.size)
         coVerify(exactly = 1) { f.cutter.cut(any(), any()) }
-    }
-
-    @Test
-    fun `cancellation from cutter restores ability to process the next pick`() = runTest {
-        val f = fixture()
-        coEvery { f.cutter.cut(any(), any()) } throws kotlinx.coroutines.CancellationException("cancelled by caller")
-        f.picks.offer(IncomingImage.Raster(byteArrayOf(1)), PickBus.TARGET_BUBBLE)
-        f.awaitState { it.phase == BubblePhase.Working }
-
-        coEvery { f.cutter.cut(any(), any()) } returns CutOutcome.CopiedSvg(Messages.COPIED)
-        f.picks.offer(IncomingImage.Svg("<svg/>"), PickBus.TARGET_BUBBLE)
-        f.awaitState { it.phase == BubblePhase.Copied }
-        assertEquals(Messages.COPIED, f.presenter.state.value.message)
-        assertEquals(100, f.presenter.state.value.percent)
     }
 
     @Test
@@ -306,13 +403,13 @@ class BubblePresenterTest {
         val context = RecordingContext(RuntimeEnvironment.getApplication())
         val f = fixture(context)
         f.presenter.onEvent(BubbleUiEvent.FromClipboard)
-        f.reads.offer(ClipboardRead(ClipboardLook.Empty, consume = true))
+        f.reads.offer(ClipboardRead(ClipboardLook.Empty, consume = true, requestId = f.reads.bubbleRequestId))
         runCurrent()
         assertEquals(BubblePhase.Failed, f.presenter.state.value.phase)
         assertEquals(Messages.EMPTY_CLIPBOARD, f.presenter.state.value.message)
         coEvery { f.cutter.cut(any(), any()) } returns CutOutcome.Failed("done")
         f.presenter.onEvent(BubbleUiEvent.FromClipboard)
-        f.reads.offer(ClipboardRead(ClipboardLook.Found(IncomingImage.Invalid("consume")), consume = true))
+        f.reads.offer(ClipboardRead(ClipboardLook.Found(IncomingImage.Invalid("consume")), consume = true, requestId = f.reads.bubbleRequestId))
         runCurrent()
         f.awaitState { it.phase == BubblePhase.Failed && it.message == "done" }
         coVerify(exactly = 1) { f.cutter.cut(any(), any()) }
@@ -337,7 +434,7 @@ class BubblePresenterTest {
             }
             copied
         }
-        f.picks.offer(IncomingImage.Raster(byteArrayOf(1)), PickBus.TARGET_BUBBLE)
+        f.pick(IncomingImage.Raster(byteArrayOf(1)))
         f.awaitState { it.phase == BubblePhase.Copied }
         assertEquals(BubblePhase.Copied, f.presenter.state.value.phase)
         assertEquals("ready", f.presenter.state.value.stage)
@@ -348,7 +445,7 @@ class BubblePresenterTest {
         coVerify(exactly = 1) { f.cutter.cut(any(), any()) }
 
         coEvery { f.cutter.cut(any(), any()) } returns CutOutcome.Failed("model")
-        f.picks.offer(IncomingImage.Invalid("bad"), PickBus.TARGET_BUBBLE)
+        f.pick(IncomingImage.Invalid("bad"))
         f.awaitState { it.phase == BubblePhase.Failed && it.message == "model" }
         assertEquals(BubblePhase.Failed, f.presenter.state.value.phase)
         assertEquals("model", f.presenter.state.value.message)
@@ -365,7 +462,7 @@ class BubblePresenterTest {
             listener.onProgress(98)
             CutOutcome.CopiedSvg(Messages.COPIED)
         }
-        f.picks.offer(IncomingImage.Svg("<svg/>"), PickBus.TARGET_BUBBLE)
+        f.pick(IncomingImage.Svg("<svg/>"))
         f.awaitState { it.phase == BubblePhase.Copied }
 
         assertEquals("ready", f.presenter.state.value.stage)
@@ -380,7 +477,7 @@ class BubblePresenterTest {
             Messages.MANUAL,
             EditFiles("original.png", "cutout.png", 4, 3),
         )
-        f.picks.offer(IncomingImage.Raster(byteArrayOf(1)), PickBus.TARGET_BUBBLE)
+        f.pick(IncomingImage.Raster(byteArrayOf(1)))
         f.awaitState { it.phase == BubblePhase.Failed && it.stage == "ready" }
         assertEquals(BubblePhase.Failed, f.presenter.state.value.phase)
         assertEquals("ready", f.presenter.state.value.stage)
@@ -389,7 +486,7 @@ class BubblePresenterTest {
         assertEquals(100, f.presenter.state.value.percent)
 
         coEvery { f.cutter.cut(any(), any()) } throws IllegalStateException("unexpected")
-        f.picks.offer(IncomingImage.Raster(byteArrayOf(1)), PickBus.TARGET_BUBBLE)
+        f.pick(IncomingImage.Raster(byteArrayOf(1)))
         f.awaitState { it.phase == BubblePhase.Failed && it.stage == "failed" }
         assertEquals(BubblePhase.Failed, f.presenter.state.value.phase)
         assertEquals("failed", f.presenter.state.value.stage)
@@ -406,11 +503,11 @@ class BubblePresenterTest {
             started.complete(Unit)
             finish.await()
         }
-        f.picks.offer(IncomingImage.Raster(byteArrayOf(1)), PickBus.TARGET_BUBBLE)
+        f.pick(IncomingImage.Raster(byteArrayOf(1)))
         runCurrent()
         started.await()
         f.awaitState { it.phase == BubblePhase.Working }
-        f.picks.offer(IncomingImage.Raster(byteArrayOf(2)), PickBus.TARGET_BUBBLE)
+        f.pick(IncomingImage.Raster(byteArrayOf(2)))
         runCurrent()
         coVerify(exactly = 1) { f.cutter.cut(any(), any()) }
         finish.complete(CutOutcome.CopiedSvg(Messages.COPIED))

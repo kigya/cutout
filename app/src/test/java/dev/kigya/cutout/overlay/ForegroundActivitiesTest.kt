@@ -43,28 +43,27 @@ class ForegroundActivitiesTest {
     private fun awaitFinished(activity: Activity) {
         val deadline = System.nanoTime() + 3_000_000_000L
         while (!activity.isFinishing && System.nanoTime() < deadline) {
-            shadowOf(Looper.getMainLooper()).idle()
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
             Thread.sleep(5)
         }
         assertTrue("foreground bridge must finish", activity.isFinishing)
     }
-    @Test fun `requestless focused clipboard read reaches only the Bubble subscriber`() = runBlocking<Unit> {
+    @Test fun `focused clipboard read settles the matching Bubble request`() = runBlocking<Unit> {
         val bus = ClipboardBus()
-        val reads = mutableListOf<ClipboardRead>()
-        val collector = launch(start = CoroutineStart.UNDISPATCHED) { bus.reads.collect { reads += it } }
+        val pending = bus.awaitBubble()
         val clipboard = mockk<ClipboardImages>()
         val look = ClipboardLook.Found(IncomingImage.Raster(byteArrayOf(4)))
         every { clipboard.peek() } returns look
-        val controller = Robolectric.buildActivity(ClipboardActivity::class.java)
+        val intent = Intent(app, ClipboardActivity::class.java).putExtra(ClipboardActivity.EXTRA_REQUEST, bus.bubbleRequestId)
+        val controller = Robolectric.buildActivity(ClipboardActivity::class.java, intent)
         val activity = controller.get()
         injected(activity); activity.clipboard = clipboard; activity.bus = bus
-        controller.create()
-        activity.onWindowFocusChanged(true)
-        yield()
-        assertEquals(listOf(ClipboardRead(look, false)), reads)
+        controller.create().start().resume().visible().windowFocusChanged(true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+        assertEquals(look, withTimeout(3000) { pending.await() })
         assertTrue(activity.isFinishing)
-        collector.cancel()
-        controller.destroy()
+        verify(exactly = 1) { clipboard.peek() }
+        controller.pause().stop().destroy()
     }
     @Test fun `closing clipboard bridge before focus does not read private clipboard data`() {
         val controller = Robolectric.buildActivity(ClipboardActivity::class.java)
@@ -77,18 +76,50 @@ class ForegroundActivitiesTest {
         verify(exactly = 0) { clipboard.peek() }
         controller.destroy()
     }
-    @Test fun `empty clipboard in an actually focused window returns without retry delay`() = runBlocking<Unit> {
-        val controller = Robolectric.buildActivity(ClipboardActivity::class.java)
-        val activity = controller.get()
+    @Test fun `clipboard bridge destruction without configuration change releases its matching waiter`() = runBlocking<Unit> {
         val bus = ClipboardBus()
+        val pending = bus.awaitBubble()
+        val clipboard = mockk<ClipboardImages>()
+        val intent = Intent(app, ClipboardActivity::class.java)
+            .putExtra(ClipboardActivity.EXTRA_REQUEST, bus.bubbleRequestId)
+        val controller = Robolectric.buildActivity(ClipboardActivity::class.java, intent)
+        val activity = controller.get()
+        injected(activity); activity.clipboard = clipboard; activity.bus = bus
+        controller.create().start().resume().visible()
+        controller.destroy()
+        assertEquals(ClipboardLook.NoFocus, withTimeout(3000) { pending.await() })
+        verify(exactly = 0) { clipboard.peek() }
+    }
+
+    @Test fun `clipboard bridge ignores a missing request id and finishes without reading`() {
+        val bus = ClipboardBus()
+        val clipboard = mockk<ClipboardImages>()
+        val controller = Robolectric.buildActivity(ClipboardActivity::class.java, Intent(app, ClipboardActivity::class.java))
+        val activity = controller.get()
+        injected(activity); activity.clipboard = clipboard; activity.bus = bus
+        controller.create().start().resume().visible()
+        assertTrue(activity.isFinishing)
+        controller.windowFocusChanged(true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+        verify(exactly = 0) { clipboard.peek() }
+        controller.pause().stop().destroy()
+    }
+    @Test fun `focused empty clipboard returns empty without an unfocused probe`() = runBlocking<Unit> {
+        val bus = ClipboardBus()
+        val pending = bus.awaitBubble()
+        val intent = Intent(app, ClipboardActivity::class.java).putExtra(ClipboardActivity.EXTRA_REQUEST, bus.bubbleRequestId)
+        val controller = Robolectric.buildActivity(ClipboardActivity::class.java, intent)
+        val activity = controller.get()
         val clipboard = mockk<ClipboardImages>()
         every { clipboard.peek() } returns ClipboardLook.Empty
         injected(activity); activity.clipboard = clipboard; activity.bus = bus
-        controller.create().start().resume().visible().windowFocusChanged(true)
-        shadowOf(Looper.getMainLooper()).idle()
+        controller.create().start().resume().visible()
+        verify(exactly = 0) { clipboard.peek() }
+        controller.windowFocusChanged(true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+        assertEquals(ClipboardLook.Empty, pending.await())
         assertTrue(activity.isFinishing)
-        // Resume probes before focus; the focus callback completes immediately without waiting 200 ms.
-        verify(exactly = 2) { clipboard.peek() }
+        verify(exactly = 1) { clipboard.peek() }
         controller.pause().stop().destroy()
     }
     @Test fun `stale picker cannot open a new system picker or settle a current request`() = runBlocking<Unit> {
@@ -147,10 +178,11 @@ class ForegroundActivitiesTest {
         val controller = Robolectric.buildActivity(ClipboardActivity::class.java, intent)
         val activity = controller.get()
         injected(activity); activity.clipboard = clipboard; activity.bus = bus
-        controller.create()
-        activity.onWindowFocusChanged(true)
-        activity.onWindowFocusChanged(false)
-        activity.onWindowFocusChanged(true)
+        controller.create().start().resume().visible()
+        controller.windowFocusChanged(true)
+        controller.windowFocusChanged(false)
+        controller.windowFocusChanged(true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
         assertEquals(expected, withTimeout(3000) { pending.await() })
         verify(exactly = 1) { clipboard.peek() }
         assertTrue(activity.isFinishing)
@@ -165,20 +197,20 @@ class ForegroundActivitiesTest {
         val controller = Robolectric.buildActivity(ClipboardActivity::class.java, intent)
         val activity = controller.get()
         injected(activity); activity.clipboard = clipboard; activity.bus = bus
-        controller.create()
-        activity.onWindowFocusChanged(true)
+        controller.create().start().resume().visible().windowFocusChanged(true)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
         assertEquals(ClipboardLook.Unreadable, withTimeout(3000) { pending.await() })
         controller.destroy()
         val staleController = Robolectric.buildActivity(ClipboardActivity::class.java, intent)
         val stale = staleController.get()
         injected(stale); stale.clipboard = clipboard; stale.bus = bus
         staleController.create().start().resume()
-        shadowOf(Looper.getMainLooper()).idle()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
         verify(exactly = 1) { clipboard.peek() }
         assertTrue(stale.isFinishing)
         staleController.pause().stop().destroy()
     }
-    @Test fun `unfocused empty clipboard retries are bounded and do not hang the request`() = runBlocking<Unit> {
+    @Test fun `missing focus times out without reading clipboard data`() = runBlocking<Unit> {
         val bus = ClipboardBus()
         val pending = bus.awaitConsume()
         val clipboard = mockk<ClipboardImages>()
@@ -189,8 +221,8 @@ class ForegroundActivitiesTest {
         injected(activity); activity.clipboard = clipboard; activity.bus = bus
         controller.create().start().resume().visible()
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(2))
-        assertEquals(ClipboardLook.Empty, withTimeout(3000) { pending.await() })
-        verify(exactly = 8) { clipboard.peek() }
+        assertEquals(ClipboardLook.NoFocus, withTimeout(3000) { pending.await() })
+        verify(exactly = 0) { clipboard.peek() }
         controller.pause().stop().destroy()
     }
     @Test fun `legacy export rejects outside cache paths and absent source before permission request`() = runBlocking<Unit> {

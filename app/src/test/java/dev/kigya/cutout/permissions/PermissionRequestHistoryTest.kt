@@ -3,6 +3,8 @@ package dev.kigya.cutout.permissions
 import android.app.Application
 import android.content.Context
 import dev.kigya.cutout.domain.PermissionKind
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -60,5 +62,60 @@ class PermissionRequestHistoryTest {
             PermissionHistoryEntry(deniedCount = 1, permanentlyDenied = false, completedAttempts = 1),
             history.complete(PermissionKind.Battery, active, GrantStatus.Denied, blocked = false),
         )
+    }
+
+    @Test fun `begin fails closed when the active request cannot be persisted`() {
+        val (context, preferences, editor) = failingPreferences()
+        every { preferences.edit() } returns editor
+        every { editor.putString(any(), any()) } returns editor
+        every { editor.commit() } returns false
+
+        val error = runCatching { PermissionRequestHistory(context).begin(PermissionKind.Overlay) }.exceptionOrNull()
+
+        assertTrue(error is IllegalStateException)
+    }
+
+    @Test fun `unknown completion reports a failed active request removal`() {
+        val (context, preferences, editor) = failingPreferences()
+        val kind = PermissionKind.Notifications
+        every { preferences.getString("permission_active_${kind.name}", null) } returns "attempt"
+        every { preferences.edit() } returns editor
+        every { editor.remove(any()) } returns editor
+        every { editor.commit() } returns false
+
+        val error = runCatching {
+            PermissionRequestHistory(context).complete(kind, "attempt", GrantStatus.Unknown, blocked = false)
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalStateException)
+        assertEquals("Could not clear unknown permission request", error?.message)
+    }
+
+    @Test fun `known completion reports a failed result write`() {
+        val (context, preferences, editor) = failingPreferences()
+        val kind = PermissionKind.Battery
+        every { preferences.getString("permission_active_${kind.name}", null) } returns "attempt"
+        every { preferences.getInt(any(), any()) } returns 0
+        every { preferences.edit() } returns editor
+        every { editor.remove(any()) } returns editor
+        every { editor.putInt(any(), any()) } returns editor
+        every { editor.putBoolean(any(), any()) } returns editor
+        every { editor.commit() } returns false
+
+        val error = runCatching {
+            PermissionRequestHistory(context).complete(kind, "attempt", GrantStatus.Denied, blocked = true)
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalStateException)
+        assertEquals("Could not persist permission request result", error?.message)
+    }
+
+    private fun failingPreferences(): Triple<Context, android.content.SharedPreferences, android.content.SharedPreferences.Editor> {
+        val context = mockk<Context>()
+        val preferences = mockk<android.content.SharedPreferences>()
+        val editor = mockk<android.content.SharedPreferences.Editor>()
+        every { context.applicationContext } returns context
+        every { context.getSharedPreferences("cutout_permission_history", Context.MODE_PRIVATE) } returns preferences
+        return Triple(context, preferences, editor)
     }
 }

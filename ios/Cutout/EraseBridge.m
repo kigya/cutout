@@ -27,4 +27,6 @@ RCT_EXTERN_METHOD(getPreferences:(RCTPromiseResolveBlock)resolve rejecter:(RCTPr
 RCT_EXTERN_METHOD(acknowledgeDiagnosticsNotice:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(setPreferences:(NSString *)theme analytics:(BOOL)analytics crashes:(BOOL)crashes resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(logProductEvent:(NSString *)name values:(NSDictionary *)values resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(getOnboardingCompleted:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(completeOnboarding:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject)
 @end

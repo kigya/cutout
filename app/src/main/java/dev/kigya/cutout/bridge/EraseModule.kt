@@ -5,6 +5,7 @@ import dev.kigya.cutout.cutout.CutOutcome
 import dev.kigya.cutout.cutout.ImageCutter
 import dev.kigya.cutout.cutout.MaskEditor
 import dev.kigya.cutout.cutout.MaskWrite
+import dev.kigya.cutout.data.BubbleAppearance
 import dev.kigya.cutout.data.BubblePreferences
 import dev.kigya.cutout.data.ClipboardImages
 import dev.kigya.cutout.data.EditFiles
@@ -67,6 +68,7 @@ class EraseModule(
     private val window: BubbleWindow,
     private val gallery: GalleryStore,
     private val images: ClipboardImages,
+    private val mainActivity: dev.kigya.cutout.MainActivityState = dev.kigya.cutout.MainActivityState(),
 ) : ReactContextBaseJavaModule(reactContext) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var cutJob: Job? = null
@@ -75,6 +77,27 @@ class EraseModule(
     private val permissionHistory by lazy { PermissionRequestHistory(reactApplicationContext) }
 
     init {
+        scope.launch {
+            preferences.appearance.collect { value ->
+                if (reactApplicationContext.hasActiveReactInstance())
+                    reactApplicationContext.emitDeviceEvent("bubbleAppearance", appearanceMap(value))
+            }
+        }
+        scope.launch {
+            window.interacting.collect { value ->
+                if (reactApplicationContext.hasActiveReactInstance())
+                    reactApplicationContext.emitDeviceEvent("bubbleInteraction", Arguments.createMap().apply { putBoolean("active", value) })
+            }
+        }
+        scope.launch {
+            mainActivity.state.collect { state ->
+                UiThreadUtil.runOnUiThread {
+                    if (reactApplicationContext.hasActiveReactInstance()) {
+                        reactApplicationContext.emitDeviceEvent("mainActivityState", mainActivityMap(state))
+                    }
+                }
+            }
+        }
         scope.launch {
             presenter.state.collect { state ->
                 emitBubble(state)
@@ -100,6 +123,40 @@ class EraseModule(
         scope.cancel()
         super.invalidate()
     }
+
+    private fun appearanceMap(value: BubbleAppearance): WritableMap = Arguments.createMap().apply {
+        putInt("sizeDp", value.sizeDp)
+        putDouble("opacity", value.opacity.toDouble())
+        putBoolean("shrinkWhenIdle", value.shrinkWhenIdle)
+        putBoolean("shrinkToDot", value.shrinkToDot)
+    }
+
+    @ReactMethod
+    fun getOnboardingCompleted(promise: Promise) { scope.launch {
+        try { promise.resolve(preferences.onboardingCompleted.first()) }
+        catch (error: Exception) { promise.reject("preferences", error) }
+    } }
+
+    @ReactMethod
+    fun completeOnboarding(promise: Promise) { scope.launch {
+        try { preferences.completeOnboarding(); promise.resolve(null) }
+        catch (error: Exception) { promise.reject("preferences", error) }
+    } }
+
+    @ReactMethod
+    fun getBubbleAppearance(promise: Promise) { scope.launch {
+        try { promise.resolve(appearanceMap(preferences.appearance.first())) }
+        catch (error: Exception) { promise.reject("preferences", error) }
+    } }
+
+    @ReactMethod
+    fun setBubbleAppearance(sizeDp: Double, opacity: Double, shrinkWhenIdle: Boolean, shrinkToDot: Boolean, promise: Promise) { scope.launch {
+        try {
+            require(sizeDp.isFinite() && opacity.isFinite())
+            preferences.setAppearance(BubbleAppearance(sizeDp.toInt(), opacity.toFloat(), shrinkWhenIdle, shrinkToDot))
+            promise.resolve(appearanceMap(preferences.appearance.first()))
+        } catch (error: Exception) { promise.reject("preferences", error) }
+    } }
 
     @ReactMethod
     fun getPreferences(promise: Promise) {
@@ -208,6 +265,7 @@ class EraseModule(
     @ReactMethod
     fun hideBubble(promise: Promise) {
         scope.launch {
+            presenter.stop()
             try {
                 preferences.setEnabled(false)
                 bubble.stop()
@@ -349,26 +407,28 @@ class EraseModule(
             return
         }
         scope.launch {
-            val revision = presenter.state.value.revision
-            if ((event == BubbleUiEvent.Collapse || event == BubbleUiEvent.Dismiss) &&
-                !presenter.state.value.expanded && !presenter.state.value.readingClipboard) {
-                promise.resolve(bubbleMap(presenter.state.value))
-                return@launch
+            try {
+                presenter.onEvent(event)
+                promise.resolve(bubbleMap(presenter.state.value).apply {
+                    if (event == BubbleUiEvent.Toggle && mainActivity.state.value.visible) {
+                        putString("actionMessage", Messages.BUBBLE_OTHER_APPS)
+                    }
+                })
+            } catch (_: Exception) {
+                promise.reject("bubble", "Could not perform Bubble action")
             }
-            presenter.onEvent(event)
-            val next = when (event) {
-                BubbleUiEvent.Toggle, BubbleUiEvent.Dismiss, BubbleUiEvent.Collapse, BubbleUiEvent.Refine, BubbleUiEvent.Again ->
-                    presenter.state.first { it.revision != revision }
-                BubbleUiEvent.FromClipboard, BubbleUiEvent.FromGallery, BubbleUiEvent.FromFile ->
-                    withTimeoutOrNull(180_000) {
-                        presenter.state.first { state ->
-                            state.revision != revision &&
-                                (state.phase == BubblePhase.Copied || state.phase == BubblePhase.Failed)
-                        }
-                    } ?: presenter.state.value
-            }
-            promise.resolve(bubbleMap(next))
         }
+    }
+
+    private fun mainActivityMap(state: dev.kigya.cutout.MainActivitySnapshot): WritableMap = Arguments.createMap().apply {
+        putInt("revision", state.revision)
+        putBoolean("visible", state.visible)
+        putBoolean("resumed", state.resumed)
+    }
+
+    @ReactMethod
+    fun getMainActivityState(promise: Promise) {
+        promise.resolve(mainActivityMap(mainActivity.state.value))
     }
 
     @ReactMethod
@@ -658,6 +718,8 @@ class EraseModule(
 
     private fun geometryMap(geometry: BubbleGeometry): WritableMap = Arguments.createMap().apply {
         putDouble("revision", geometry.revision.toDouble())
+        putInt("stateRevision", geometry.stateRevision)
+        putString("phase", geometry.phase.name.lowercase())
         putBoolean("expanded", geometry.expanded)
         putBoolean("anchorEnd", geometry.anchorEnd)
         putDouble("windowWidthDp", geometry.windowWidthDp.toDouble())

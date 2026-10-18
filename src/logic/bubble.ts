@@ -7,7 +7,7 @@ export function bubbleEnabledAfter(action: BubbleAction, requested = false): boo
   return requested;
 }
 
-export const BUBBLE_CHIP = 76;
+export const BUBBLE_CHIP = 64;
 export const BUBBLE_EDGE = 8;
 export const BUBBLE_PANEL = 260;
 

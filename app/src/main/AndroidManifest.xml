@@ -56,9 +56,11 @@
         </activity>
 
         <activity android:name=".overlay.LegacyExportActivity" android:exported="false"
+            android:taskAffinity="dev.kigya.cutout.export"
             android:excludeFromRecents="true" android:theme="@style/Theme.Erase.Picker" />
         <activity
             android:name=".overlay.PickerActivity"
+            android:taskAffinity="dev.kigya.cutout.picker"
             android:excludeFromRecents="true"
             android:exported="false"
             android:theme="@style/Theme.Erase.Picker" />

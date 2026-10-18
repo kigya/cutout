@@ -35,6 +35,7 @@ class ApplicationLifecycleTest {
         every { DefaultReactHost.getDefaultReactHost(context = any(), packageList = capture(packages), useDevSupport = capture(development)) } returns host
         for (debug in listOf(false, true)) {
             val application = EraseApp()
+            application.mainActivityState = MainActivityState()
             ReflectionHelpers.callInstanceMethod<Void>(application, "attachBaseContext", ReflectionHelpers.ClassParameter.from(Context::class.java, RuntimeEnvironment.getApplication()))
             ReflectionHelpers.setField(application, "injected", true)
             application.applicationInfo.flags = if (debug) application.applicationInfo.flags or ApplicationInfo.FLAG_DEBUGGABLE else application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE.inv()
@@ -43,6 +44,9 @@ class ApplicationLifecycleTest {
             assertTrue(dev.kigya.cutout.data.AppTelemetry(application).crashEnabled)
             assertSame(host, application.reactHost)
             assertSame(host, application.reactHost)
+            assertSame(application.bubbleLifecycle, application.bubbleLifecycle)
+            application.bubbleLifecycle.attach()
+            application.bubbleLifecycle.detach()
             verify(exactly = 1) { ReactNativeApplicationEntryPoint.loadReactNative(application) }
         }
         assertEquals(listOf(false, true), development)

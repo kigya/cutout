@@ -1,5 +1,6 @@
+import { MainAppState as AppState } from './native/MainAppState';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, BackHandler, DeviceEventEmitter, Linking, View } from 'react-native';
+import { ActivityIndicator, BackHandler, DeviceEventEmitter, Linking, Pressable, Text, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -18,6 +19,8 @@ import { LanguageScreen } from './screens/LanguageScreen';
 import { ProcessingScreen } from './screens/ProcessingScreen';
 import { ResultScreen } from './screens/ResultScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { OnboardingScreen } from './screens/OnboardingScreen';
+import { BubbleAppearanceScreen } from './screens/BubbleAppearanceScreen';
 import { FeedbackScreen } from './screens/FeedbackScreen';
 
 type Source = 'gallery' | 'file' | 'clipboard' | 'fixture';
@@ -27,6 +30,8 @@ type Route =
   | { name: 'settings' }
   | { name: 'feedback' }
   | { name: 'language' }
+  | { name: 'bubble-size' }
+  | { name: 'bubble-opacity' }
   | { name: 'processing'; preview: string | null; percent: number; stage?: 'preparing'|'inference'|'exporting'|'ready'|'failed'|'idle' }
   | { name: 'result'; session: EditSession }
   | { name: 'editor'; session: EditSession };
@@ -96,6 +101,13 @@ function Root({ preferences, onPreferences, onDismissDiagnosticsNotice }: { pref
   const { locale, t } = useLocale();
   const { colors } = useTheme();
   const [booting, setBooting] = useState(true);
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
+  const [onboardingError, setOnboardingError] = useState(false);
+  const loadOnboarding = useCallback(() => {
+    setOnboardingError(false);
+    void Erase.getOnboardingCompleted().then(setOnboardingCompleted).catch(() => setOnboardingError(true));
+  }, []);
+  useEffect(loadOnboarding, [loadOnboarding]);
   const finishBoot = useCallback(() => setBooting(false), []);
   const [route, setRoute] = useState<Route>({ name: 'home' });
   const [home, setHome] = useState<HomeSnapshot>(EMPTY);
@@ -223,6 +235,13 @@ function Root({ preferences, onPreferences, onDismissDiagnosticsNotice }: { pref
   const openPrivacy = () => { void Linking.openURL(PRIVACY_POLICY_URL).catch(() => setNotice(t('privacyOpenFailed'))); };
 
   if (booting) return <SplashScreen onDone={finishBoot} />;
+  if (onboardingCompleted == null) return <View style={{ flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+    {onboardingError ? <><Text style={{ color: colors.text, textAlign: 'center' }}>{t('appearanceLoadFailed')}</Text><Pressable accessibilityRole="button" onPress={loadOnboarding} style={{ minHeight: 48, justifyContent: 'center' }}><Text style={{ color: colors.primary }}>{t('retry')}</Text></Pressable></> : <ActivityIndicator color={colors.primary} />}
+  </View>;
+  if (!onboardingCompleted) return <OnboardingScreen onComplete={async () => {
+    await Erase.completeOnboarding();
+    setOnboardingCompleted(true);
+  }} />;
 
   return (
     <View className="flex-1" style={{ backgroundColor: colors.background }}>
@@ -242,6 +261,8 @@ function Root({ preferences, onPreferences, onDismissDiagnosticsNotice }: { pref
       ) : null}
       {route.name === 'settings' ? (
         <SettingsScreen
+          onBubbleSize={() => setRoute({ name: 'bubble-size' })}
+          onBubbleOpacity={() => setRoute({ name: 'bubble-opacity' })}
           showXiaomiTip={home.showXiaomiTip}
           notice={notice}
           themeMode={preferences.theme}
@@ -256,6 +277,7 @@ function Root({ preferences, onPreferences, onDismissDiagnosticsNotice }: { pref
           onLanguage={() => setRoute({ name: 'language' })}
         />
       ) : null}
+      {route.name === 'bubble-size' || route.name === 'bubble-opacity' ? <BubbleAppearanceScreen mode={route.name === 'bubble-size' ? 'size' : 'opacity'} onBack={() => setRoute({ name: 'settings' })} /> : null}
       {route.name === 'feedback' ? <FeedbackScreen endpoint={FEEDBACK_ENDPOINT} onBack={() => setRoute({ name: 'settings' })} /> : null}
       {route.name === 'language' ? <LanguageScreen onBack={() => setRoute({ name: 'settings' })} /> : null}
       {route.name === 'processing' ? (

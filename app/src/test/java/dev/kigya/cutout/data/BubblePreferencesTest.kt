@@ -44,6 +44,10 @@ class BubblePreferencesTest {
             ) } returns store
             val preferences = BubblePreferences(RuntimeEnvironment.getApplication())
             preferences.setEnabled(true)
+            preferences.completeOnboarding()
+            assertTrue(preferences.onboardingCompleted.first())
+            preferences.setAppearance(BubbleAppearance(72, 0.8f, true, true))
+            assertEquals(BubbleAppearance(72, 0.8f, true, true), preferences.appearance.first())
             assertTrue(preferences.enabled.first())
             preferences.setSpot(0.8f, 0.1f)
             assertEquals(BubbleSpot(0.8f, 0.1f), preferences.spot.first())
@@ -77,4 +81,30 @@ class BubblePreferencesTest {
             assertNull(preferences.spot.first())
         }
     }
+    @Test fun `onboarding completion and appearance survive recreation and normalize persisted ranges`() = runBlocking<Unit> {
+        withTimeout(5000) {
+            val app = RuntimeEnvironment.getApplication()
+            val preferences = BubblePreferences(app)
+            val store = ReflectionHelpers.callStaticMethod<DataStore<Preferences>>(
+                Class.forName("dev.kigya.cutout.data.BubblePreferencesKt"), "getEraseStore",
+                ReflectionHelpers.ClassParameter.from(Context::class.java, app),
+            )
+            store.edit { it.clear() }
+            assertFalse(preferences.onboardingCompleted.first())
+            assertEquals(BubbleAppearance(), preferences.appearance.first())
+            preferences.completeOnboarding()
+            assertTrue(BubblePreferences(app).onboardingCompleted.first())
+            preferences.setAppearance(BubbleAppearance(80, 0.55f, true, true))
+            assertEquals(BubbleAppearance(80, 0.55f, true, true), BubblePreferences(app).appearance.first())
+            preferences.setAppearance(BubbleAppearance(100, 2f, false, false))
+            assertEquals(BubbleAppearance(88, 1f), preferences.appearance.first())
+            preferences.setAppearance(BubbleAppearance(1, -1f))
+            assertEquals(BubbleAppearance(48, 0.2f), preferences.appearance.first())
+            try { preferences.setAppearance(BubbleAppearance(opacity = Float.NaN)); fail("Invalid opacity must fail") }
+            catch (_: IllegalArgumentException) { assertEquals(0.2f, preferences.appearance.first().opacity) }
+            store.edit { it[floatPreferencesKey("bubble_opacity")] = Float.POSITIVE_INFINITY }
+            assertEquals(0.7f, preferences.appearance.first().opacity)
+        }
+    }
+
 }

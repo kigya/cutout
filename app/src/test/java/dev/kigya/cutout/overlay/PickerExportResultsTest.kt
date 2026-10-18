@@ -164,7 +164,7 @@ class PickerExportResultsTest {
         assertNotNull(next)
         LegacyExportActivity.cancel(next!!)
     }
-    @Test fun `request without explicit target routes picker cancellation to Bubble only`() = runBlocking<Unit> {
+    @Test fun `orphaned request without correlation cannot cancel a current Bubble request`() = runBlocking<Unit> {
         val bus = PickBus()
         val results = mutableListOf<IncomingImage?>()
         val collector = launch(start = CoroutineStart.UNDISPATCHED) { bus.bubblePicks.collect { results += it } }
@@ -176,10 +176,51 @@ class PickerExportResultsTest {
         // RESULT_OK without data is also a cancellation, rather than an unreadable image.
         shadowOf(activity).receiveResult(launch.intent, Activity.RESULT_OK, Intent())
         yield()
-        assertEquals(listOf<IncomingImage?>(null), results)
+        assertTrue(results.isEmpty())
         assertTrue(activity.isFinishing)
         collector.cancel()
         controller.pause().stop().destroy()
+    }
+
+    @Test fun `matching Bubble picker imports a raster and a stale Bubble picker exits immediately`() = runBlocking<Unit> {
+        val provider = provider()
+        val bus = PickBus()
+        val received = mutableListOf<IncomingImage?>()
+        val collector = launch(start = CoroutineStart.UNDISPATCHED) { bus.bubblePicks.collect { received += it } }
+        val requestId = bus.beginBubble()
+        val controller = Robolectric.buildActivity(
+            PickerActivity::class.java,
+            Intent(app, PickerActivity::class.java)
+                .putExtra(PickerActivity.EXTRA_TARGET, PickBus.TARGET_BUBBLE)
+                .putExtra(PickerActivity.EXTRA_REQUEST, requestId),
+        )
+        val activity = controller.get()
+        injected(activity); activity.bus = bus
+        controller.create().start().resume()
+        val launch = shadowOf(activity).nextStartedActivityForResult
+        assertNotNull(launch)
+        shadowOf(activity).receiveResult(launch.intent, Activity.RESULT_OK, Intent().setData(Uri.parse("content://qa.document/raster")))
+        finish(activity)
+        yield()
+        assertEquals(1, received.size)
+        assertArrayEquals(byteArrayOf(1, 2, 3), (received.single() as IncomingImage.Raster).bytes)
+        assertNull(bus.bubbleRequestId)
+        collector.cancel()
+        controller.pause().stop().destroy()
+
+        val stale = Robolectric.buildActivity(
+            PickerActivity::class.java,
+            Intent(app, PickerActivity::class.java)
+                .putExtra(PickerActivity.EXTRA_TARGET, PickBus.TARGET_BUBBLE)
+                .putExtra(PickerActivity.EXTRA_REQUEST, "stale"),
+        )
+        val staleActivity = stale.get()
+        injected(staleActivity); staleActivity.bus = bus
+        stale.create().start().resume()
+        assertTrue(staleActivity.isFinishing)
+        assertNull(shadowOf(staleActivity).nextStartedActivityForResult)
+        stale.pause().stop().destroy()
+        assertTrue(provider.file.isFile)
     }
     @Test fun `legacy permission grant revalidates a source removed while system dialog was open`() = runBlocking<Unit> {
         shadowOf(app).denyPermissions(Manifest.permission.WRITE_EXTERNAL_STORAGE)

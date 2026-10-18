@@ -12,6 +12,7 @@ Cutout includes or adapts the following software. Original copyright notices and
 | ONNX Runtime | MIT | https://github.com/microsoft/onnxruntime |
 | ISNet general ONNX model | MIT | https://huggingface.co/imgly/isnet-general-onnx |
 | AndroidSVG | Apache-2.0 | https://github.com/BigBadaboom/androidsvg |
+| Manrope font | SIL Open Font License 1.1 | https://github.com/sharanda/manrope |
 | Firebase SDKs | Apache-2.0 | https://github.com/firebase |
 | Google Play In-App Review 2.0.2 (Android) | Google Play Core SDK Terms of Service | https://developer.android.com/guide/playcore/license |
 
@@ -20,3 +21,5 @@ The bundled model revision, license metadata, and integrity hash are recorded in
 The adapted canvas source and complete MIT notice are in [src/editor/vendor](src/editor/vendor/PROVENANCE.md). Cutout extends this code for alpha-mask editing, undo/redo checkpoints, and coordinated gestures. No Expo example is bundled.
 
 The app icon uses the supplied portrait/eraser artwork, recolored for Cutout. Platform icon exports share the same source artwork.
+
+The bundled Manrope font and its full license are in [assets/fonts](assets/fonts/OFL.txt).

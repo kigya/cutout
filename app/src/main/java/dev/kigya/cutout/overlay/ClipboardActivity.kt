@@ -1,6 +1,8 @@
 package dev.kigya.cutout.overlay
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import dev.kigya.cutout.data.ClipboardImages
 import dev.kigya.cutout.data.ClipboardLook
@@ -13,42 +15,52 @@ class ClipboardActivity : ComponentActivity() {
     @Inject lateinit var bus: ClipboardBus
 
     private var delivered = false
-    private var attempts = 0
+    private val handler = Handler(Looper.getMainLooper())
+    private val timeout = Runnable { complete(ClipboardLook.NoFocus) }
+    private val read = Runnable {
+        if (!delivered && !isFinishing && hasWindowFocus()) {
+            complete(runCatching { clipboard.peek() }.getOrElse { ClipboardLook.Unreadable })
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         overridePendingTransition(0, 0)
         val requestId = intent.getStringExtra(EXTRA_REQUEST)
-        if (requestId != null && !bus.attachForeground(this, requestId)) {
+        if (requestId == null || !bus.attachForeground(this, requestId)) {
             delivered = true
             finish()
+            return
         }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        window.decorView.post { deliver() }
+        handler.postDelayed(timeout, 2_000L)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) deliver()
+        if (hasFocus) {
+            handler.removeCallbacks(read)
+            // Let WindowManager commit the focus before ClipboardService checks it.
+            handler.postDelayed(read, 80)
+        } else handler.removeCallbacks(read)
     }
 
-    private fun deliver() {
+    private fun complete(look: ClipboardLook) {
         if (delivered || isFinishing) return
-        attempts += 1
-        val look = runCatching { clipboard.peek() }.getOrElse { ClipboardLook.Unreadable }
-        if (look is ClipboardLook.Empty && attempts < 8 && !hasWindowFocus()) {
-            window.decorView.postDelayed({ deliver() }, 200)
-            return
-        }
         delivered = true
+        handler.removeCallbacksAndMessages(null)
         val consume = intent.getBooleanExtra(EXTRA_CONSUME, false)
         bus.offer(ClipboardRead(look, consume, intent.getStringExtra(EXTRA_REQUEST)))
         finish()
         @Suppress("DEPRECATION")
         overridePendingTransition(0, 0)
+    }
+
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
+        if (!delivered && !isChangingConfigurations) {
+            bus.offer(ClipboardRead(ClipboardLook.NoFocus, true, intent.getStringExtra(EXTRA_REQUEST)))
+        }
+        super.onDestroy()
     }
 
     companion object {

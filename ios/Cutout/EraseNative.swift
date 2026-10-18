@@ -361,6 +361,17 @@ final class EraseNative: RCTEventEmitter, PHPickerViewControllerDelegate, UIDocu
     resolve(["selected": UserDefaults.standard.string(forKey: "erase.locale") ?? "", "system": system])
   }
 
+  @objc(getOnboardingCompleted:rejecter:)
+  func getOnboardingCompleted(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
+    resolve(UserDefaults.standard.bool(forKey: "cutout.onboardingCompleted"))
+  }
+
+  @objc(completeOnboarding:rejecter:)
+  func completeOnboarding(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
+    UserDefaults.standard.set(true, forKey: "cutout.onboardingCompleted")
+    resolve(nil)
+  }
+
   @objc(getPreferences:rejecter:)
   func getPreferences(_ resolve: RCTPromiseResolveBlock, rejecter reject: RCTPromiseRejectBlock) {
     let defaults = UserDefaults.standard

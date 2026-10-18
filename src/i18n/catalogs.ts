@@ -73,6 +73,8 @@ const codes: Record<string, MessageKey> = {
   empty_clipboard: 'emptyClipboard',
   picker_failed: 'pickerFailed',
   cancelled: 'cancelled',
+  bubble_other_apps: 'bubbleOtherApps',
+  clipboard_no_focus: 'clipboardNoFocus',
 };
 
 export function catalogText(value: string | undefined, fallback: string): string {

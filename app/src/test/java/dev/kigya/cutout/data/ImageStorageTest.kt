@@ -106,6 +106,18 @@ class ImageStorageTest {
         assertEquals(1, decoded.height)
         decoded.recycle()
     }
+
+    @Test fun `raster decoder downsamples tall sources using their height bound`() {
+        val source = Bitmap.createBitmap(2, 4097, Bitmap.Config.ARGB_8888)
+        val bytes = ByteArrayOutputStream().also { source.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        source.recycle()
+
+        val decoded = decodeRaster(bytes)!!
+
+        assertEquals(1, decoded.width)
+        assertEquals(2048, decoded.height)
+        decoded.recycle()
+    }
     @Test @Config(sdk = [30]) fun `invalid raster fallback safely returns null before ImageDecoder is available`() {
         assertNull(decodeRaster(byteArrayOf(0, 1, 2)))
     }
@@ -118,6 +130,26 @@ class ImageStorageTest {
         // can still succeed, while the full BitmapFactory decode must fall back and fail safely.
         val truncated = valid.copyOf(24)
         assertNull(decodeRaster(truncated))
+    }
+
+    @Test fun `raster with valid width and zero height is rejected by bounds validation`() {
+        val valid = ByteArrayOutputStream().also {
+            bitmap().compress(Bitmap.CompressFormat.PNG, 100, it)
+        }.toByteArray()
+        val zeroHeight = valid.copyOf().apply { fill(0, 20, 24) }
+
+        assertNull(decodeRaster(zeroHeight))
+    }
+
+    @Test fun `raster with valid bounds and a truncated image chunk falls back safely`() {
+        val valid = ByteArrayOutputStream().also {
+            bitmap().compress(Bitmap.CompressFormat.PNG, 100, it)
+        }.toByteArray()
+        // The PNG signature, IHDR, and first IDAT chunk header remain; the compressed payload
+        // and checksum are absent, so bounds parsing succeeds but the full raster decode fails.
+        val truncatedAfterChunkHeader = valid.copyOf(41)
+
+        assertNull(decodeRaster(truncatedAfterChunkHeader))
     }
     @Test fun `raster import honors every EXIF rotation and mirror orientation`() {
         val source = Bitmap.createBitmap(intArrayOf(Color.RED, Color.GREEN, Color.BLUE, Color.CYAN, Color.MAGENTA, Color.YELLOW), 3, 2, Bitmap.Config.ARGB_8888)
@@ -183,9 +215,21 @@ class ImageStorageTest {
         provider.failWrite = true
         assertFalse(gallery.savePng(file.path))
         assertEquals(2, provider.deletes)
+        provider.failDelete = true
+        assertFalse(gallery.savePng(file.path))
+        assertEquals(3, provider.deletes)
+        provider.failDelete = false
+        provider.returnNullStream = true
+        assertFalse(gallery.savePng(file.path))
+        assertEquals(4, provider.deletes)
+        provider.returnNullStream = false
         provider.failInsert = true
         assertFalse(gallery.savePng(file.path))
-        assertEquals(2, provider.deletes)
+        assertEquals(4, provider.deletes)
+        provider.failInsert = false
+        provider.returnNullInsert = true
+        assertFalse(gallery.savePng(file.path))
+        assertEquals(4, provider.deletes)
     }
     @Test @Config(sdk = [28]) fun `legacy gallery save skips scoped storage pending metadata`() {
         val provider = RecordingMediaProvider(File(directory, "legacy-gallery.png")).apply {
@@ -206,13 +250,17 @@ class ImageStorageTest {
         var updated: ContentValues? = null
         var deletes = 0
         var failInsert = false
+        var returnNullInsert = false
         var failWrite = false
         var failPublish = false
+        var failDelete = false
+        var returnNullStream = false
         override fun onCreate() = true
         override fun getType(uri: Uri) = "image/png"
         override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? = null
         override fun insert(uri: Uri, values: ContentValues?): Uri? {
             if (failInsert) throw SecurityException("denied")
+            if (returnNullInsert) return null
             inserted = ContentValues(values)
             return Uri.parse("content://media/external/images/media/1")
         }
@@ -220,10 +268,19 @@ class ImageStorageTest {
             if (failWrite) throw java.io.FileNotFoundException("full")
             return ParcelFileDescriptor.open(output, ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE)
         }
+        override fun openAssetFile(uri: Uri, mode: String): android.content.res.AssetFileDescriptor? {
+            if (returnNullStream) return null
+            return super.openAssetFile(uri, mode)
+        }
         override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?): Int {
             updated = ContentValues(values)
             return if (failPublish) 0 else 1
         }
-        override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int { deletes++; output.delete(); return 1 }
+        override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int {
+            deletes++
+            if (failDelete) throw SecurityException("cannot roll back")
+            output.delete()
+            return 1
+        }
     }
 }

@@ -1,5 +1,6 @@
+import { MainAppState as AppState } from '../native/MainAppState';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Modal, PermissionsAndroid, Platform, Pressable, Switch, Text, View } from 'react-native';
+import { Modal, PermissionsAndroid, Platform, Pressable, Switch, Text, View } from 'react-native';
 import { Badge } from '../components/ui/badge';
 import { BubbleDemo } from '../components/BubbleDemo';
 import { Button } from '../components/ui/button';
@@ -116,7 +117,7 @@ export function HomeScreen({ home, busy, notice, diagnosticsNoticePending = fals
         await finishSettingsAttempt(attempt);
       }
     } catch {
-      if (settingsAttemptRef.current === attempt) settingsAttemptRef.current = null;
+      settingsAttemptRef.current = null;
       if (enableAfterGrant) updatePendingEnable(false);
       setBubbleNotice(t('readFailed'));
       onRefresh();

@@ -1,16 +1,17 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, ActivityIndicator, DeviceEventEmitter, Image, Pressable, ScrollView, Text, ToastAndroid, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { BubbleGlyph } from '../components/BubbleGlyph';
+import { DEFAULT_BUBBLE_APPEARANCE, normalizeBubbleAppearance } from '../logic/bubbleAppearance';
 import { SweepPreview } from '../components/SweepPreview';
 import { Notice } from '../components/ui/notice';
 import { bubbleFrame } from '../logic/bubble';
-import { canUseClipboard } from '../logic/clipboard';
 import { clampPercent } from '../logic/progress';
 import { savePhase } from '../logic/save';
 import { isRtl } from '../logic/languages';
 import { localizeMessage } from '../i18n/catalogs';
 import { useLocale } from '../i18n/LocaleGate';
-import { Erase, type BubbleGeometry, type BubbleSnapshot } from '../native/Erase';
+import { Erase, type BubbleGeometry, type BubbleSnapshot, type BubbleAppearance } from '../native/Erase';
 import { useTheme } from '../theme/ThemeProvider';
 
 const EMPTY: BubbleSnapshot = {
@@ -34,14 +35,24 @@ export function BubbleApp() {
   const [state, setState] = useState<BubbleSnapshot>(EMPTY);
   const [geometry, setGeometry] = useState<BubbleGeometry | null>(null);
   const geometryRevision = useRef(-1);
+  const [appearance, setAppearance] = useState(DEFAULT_BUBBLE_APPEARANCE);
+  const [compact, setCompact] = useState(false);
+  const [interacting, setInteracting] = useState(false);
+  const [activity, setActivity] = useState(0);
   const [note, setNote] = useState('');
   const [action, setAction] = useState<'copy' | 'save' | 'openEditor' | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
   const savingRef = useRef(false);
   const actionRef = useRef(false);
   const revisionRef = useRef(-1);
+  const mountedRef = useRef(true);
   const panel = useSharedValue(0);
   const side = useSharedValue(1);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -86,6 +97,27 @@ export function BubbleApp() {
     if (geometry) Erase.ackBubbleGeometry?.(geometry.revision);
   }, [geometry]);
 
+  useEffect(() => {
+    let live = true;
+    let received = false;
+    const appearanceEvent = DeviceEventEmitter.addListener('bubbleAppearance', (next: BubbleAppearance) => {
+      received = true; setAppearance(normalizeBubbleAppearance(next));
+    });
+    const interactionEvent = DeviceEventEmitter.addListener('bubbleInteraction', (event: { active: boolean }) => {
+      setInteracting(event.active); setCompact(false); setActivity(previous => previous + 1);
+    });
+    void Erase.getBubbleAppearance().then(next => { if (live && !received) setAppearance(normalizeBubbleAppearance(next)); }).catch(() => undefined);
+    return () => { live = false; appearanceEvent.remove(); interactionEvent.remove(); };
+  }, []);
+  useEffect(() => {
+    setCompact(false);
+    if (!appearance.shrinkWhenIdle || state.expanded || state.phase === 'working' || state.readingClipboard || action || interacting) return;
+    const timer = setTimeout(() => setCompact(true), 3000);
+    return () => clearTimeout(timer);
+  }, [appearance, state.expanded, state.phase, state.readingClipboard, action, interacting, activity]);
+
+  const chipSize = geometry?.chipSizeDp ?? appearance.sizeDp + 8;
+  const visualSize = chipSize - 8;
   const busy = state.phase === 'working';
   const result = state.phase === 'copied' || (state.phase === 'failed' && state.editReady);
   const anchorEnd = geometry?.anchorEnd ?? state.anchorEnd;
@@ -93,6 +125,9 @@ export function BubbleApp() {
   const chipTop = geometry?.chipTopDp ?? 0;
   const panelWidth = geometry?.panelWidthDp ?? 260;
   const panelHeight = geometry?.panelHeightDp ?? bubbleFrame({ ...state, expanded: true }).height;
+  const expanded = state.expanded && (!geometry || (geometry.expanded &&
+    (state.revision ?? 0) >= (geometry.stateRevision ?? 0) && (!geometry.phase || geometry.phase === state.phase)));
+  const notice = note || localizeMessage(locale, state.message);
   useEffect(() => {
     side.value = anchorEnd ? 1 : -1;
     panel.value = state.expanded && !reducedMotion ? withTiming(1, { duration: 160 }) : state.expanded ? 1 : 0;
@@ -104,26 +139,36 @@ export function BubbleApp() {
   }));
 
   async function run(action: 'toggle' | 'clipboard' | 'gallery' | 'file' | 'refine' | 'dismiss' | 'again') {
-    if (actionRef.current || savingRef.current) return;
-    actionRef.current = true;
+    setCompact(false); setActivity(previous => previous + 1);
+    const control = action === 'toggle' || action === 'dismiss';
+    if (!control && (actionRef.current || savingRef.current)) return;
+    if (!control) actionRef.current = true;
     if (action === 'refine') setAction('openEditor');
     if (action === 'clipboard' || action === 'gallery' || action === 'file') {
       setNote('');
     }
     try {
       const next = await Erase.bubbleAction(action);
+      if (!mountedRef.current) return;
       const revision = (next as BubbleSnapshot & { revision?: number }).revision ?? revisionRef.current + 1;
       if (revision >= revisionRef.current) {
         revisionRef.current = revision;
         setState(next);
       }
       setNote(localizeMessage(localeRef.current, next.message));
+      if (action === 'toggle' && next.actionMessage === 'bubble_other_apps') {
+        const message = localizeMessage(localeRef.current, next.actionMessage);
+        ToastAndroid.show(message, ToastAndroid.SHORT);
+        AccessibilityInfo.announceForAccessibility(message);
+      }
       if (action === 'refine' && !next.expanded) ToastAndroid.show(t('editInApp'), ToastAndroid.SHORT);
     } catch {
-      setNote(t('readFailed'));
+      if (mountedRef.current) setNote(t('readFailed'));
     } finally {
-      actionRef.current = false;
-      setAction(null);
+      if (!control) {
+        actionRef.current = false;
+        if (mountedRef.current) setAction(null);
+      }
     }
   }
 
@@ -132,8 +177,10 @@ export function BubbleApp() {
   }
 
   async function collapse(message: string) {
+    // Callers check the surface lifetime synchronously before entering this helper.
     // Collapse is idempotent; a delayed success can never reopen the panel.
     const next = await Erase.bubbleAction('collapse');
+    if (!mountedRef.current) return;
     const revision = next.revision ?? revisionRef.current + 1;
     if (revision >= revisionRef.current) {
       revisionRef.current = revision;
@@ -150,13 +197,14 @@ export function BubbleApp() {
     setAction('copy');
     try {
       const status = await Erase.publishPng(state.previewPath);
+      if (!mountedRef.current) return;
       if (status === 'copied') await collapse(t('copied'));
       else setNote(t('nothingToCopy'));
     } catch {
-      setNote(t('saveFailed'));
+      if (mountedRef.current) setNote(t('saveFailed'));
     } finally {
       savingRef.current = false;
-      setAction(null);
+      if (mountedRef.current) setAction(null);
     }
   }
 
@@ -167,14 +215,15 @@ export function BubbleApp() {
     setAction('save');
     try {
       const status = await Erase.saveToGallery(path);
+      if (!mountedRef.current) return;
       const message = t(savePhase(status) === 'saved' ? 'saved' : 'saveFailed');
       if (savePhase(status) === 'saved') await collapse(message);
       else setNote(message);
     } catch {
-      setNote(t('saveFailed'));
+      if (mountedRef.current) setNote(t('saveFailed'));
     } finally {
       savingRef.current = false;
-      setAction(null);
+      if (mountedRef.current) setAction(null);
     }
   }
 
@@ -195,7 +244,7 @@ export function BubbleApp() {
           {state.previewPath ? (
             <BubblePreview path={state.previewPath} background={colors.surfaceRaised} label={t('done')} />
           ) : null}
-          <Notice message={note} />
+          <Notice message={notice} />
           <Action label={t('copy')} loading={action === 'copy'} disabled={action != null || !state.previewPath} onPress={() => { void copy(); }} colors={colors} />
           <Action label={t('save')} loading={action === 'save'} disabled={action != null || !state.previewPath} onPress={() => { void save(); }} colors={colors} />
           {state.editReady ? <Action label={t('editInApp')} loading={action === 'openEditor'} disabled={action != null} onPress={() => { void run('refine'); }} colors={colors} /> : null}
@@ -204,30 +253,30 @@ export function BubbleApp() {
       ) : null}
       {!busy && !result ? (
         <View>
-          <Action label={t('fromClipboard')} disabled={!canUseClipboard(state.clipboardReady)} onPress={() => { void run('clipboard'); }} colors={colors} />
-          <Action label={t('fromGallery')} onPress={() => { void run('gallery'); }} colors={colors} />
-          <Action label={t('file')} onPress={() => { void run('file'); }} colors={colors} />
-          <Notice message={note} />
+          <Action label={t('fromClipboard')} loading={state.readingClipboard} disabled={state.readingClipboard} onPress={() => { void run('clipboard'); }} colors={colors} />
+          <Action label={t('fromGallery')} disabled={state.readingClipboard} onPress={() => { void run('gallery'); }} colors={colors} />
+          <Action label={t('file')} disabled={state.readingClipboard} onPress={() => { void run('file'); }} colors={colors} />
+          <Notice message={notice} />
         </View>
       ) : null}
     </ScrollView>
   );
 
   return (
-    <View testID="bubble-surface" style={{ width: 628, height: 400, direction: 'ltr' }}>
-      <View testID="bubble-chip" style={{ direction: 'ltr', position: 'absolute', left: chipLeft, top: chipTop, width: 84, height: 84 }}>
+    <View testID="bubble-surface" style={{ width: geometry?.surfaceWidthDp ?? 640, height: geometry?.surfaceHeightDp ?? 400, direction: 'ltr' }}>
+      <View testID="bubble-chip" style={{ direction: 'ltr', position: 'absolute', left: chipLeft, top: chipTop, width: chipSize, height: chipSize }}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('cutBackground')}
-          className="items-center justify-center overflow-hidden rounded-full"
-          style={{ width: 76, height: 76, marginTop: 4, marginLeft: 4, backgroundColor: colors.primary, opacity: 0.7 }}
+          className="items-center justify-center"
+          style={{ width: chipSize, height: chipSize }}
           onPress={() => { void run('toggle'); }}>
-          <Image source={require('../assets/bubble-icon.png')} style={{ width: 48, height: 48, tintColor: colors.onPrimary }} resizeMode="contain" />
+          <BubbleGlyph size={visualSize} opacity={appearance.opacity} compact={compact} dot={appearance.shrinkToDot} reducedMotion={reducedMotion} />
         </Pressable>
 
       </View>
-      {state.expanded ? (
-        <Animated.View testID="bubble-panel" style={[{ direction: 'ltr', position: 'absolute', left: anchorEnd ? 260 - panelWidth : 368, top: 0, width: panelWidth, height: panelHeight }, panelStyle]}>
+      {expanded ? (
+        <Animated.View testID="bubble-panel" style={[{ direction: 'ltr', position: 'absolute', left: anchorEnd ? chipLeft - 12 - panelWidth : chipLeft + chipSize + 12, top: 0, width: panelWidth, height: panelHeight }, panelStyle]}>
           {actions}
         </Animated.View>
       ) : null}
@@ -235,7 +284,7 @@ export function BubbleApp() {
   );
 }
 
-function Action({ label, onPress, disabled = false, loading = false, colors }: { label: string; onPress: () => void; disabled?: boolean; loading?: boolean; colors: ReturnType<typeof useTheme>['colors'] }) {
+function Action({ label, onPress, disabled, loading = false, colors }: { label: string; onPress: () => void; disabled: boolean; loading?: boolean; colors: ReturnType<typeof useTheme>['colors'] }) {
   return (
     <Pressable
       accessibilityRole="button"

@@ -20,6 +20,7 @@ sealed interface ClipboardLook {
     data class Found(val image: IncomingImage) : ClipboardLook
     data object Empty : ClipboardLook
     data object Unreadable : ClipboardLook
+    data object NoFocus : ClipboardLook
 }
 
 @Singleton

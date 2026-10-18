@@ -79,7 +79,7 @@ class ForegroundRequestLifecycleTest {
         assertNull(bus.editorRequestId)
         val values = mutableListOf<IncomingImage?>()
         val collector = launch(start = CoroutineStart.UNDISPATCHED) { bus.bubblePicks.collect { values += it } }
-        bus.cancel(PickBus.TARGET_BUBBLE); yield()
+        bus.cancel(PickBus.TARGET_BUBBLE, bus.beginBubble()); yield()
         assertEquals(listOf<IncomingImage?>(null), values)
         collector.cancel()
     }

@@ -1,6 +1,8 @@
+import { MainAppState as AppState } from '../native/MainAppState';
 import { useEffect, useState } from 'react';
-import { AccessibilityInfo, AppState, Pressable, Text, View } from 'react-native';
+import { AccessibilityInfo, Pressable, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import { BubbleGlyph } from './BubbleGlyph';
 import { useLocale } from '../i18n/LocaleGate';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -37,8 +39,8 @@ export function BubbleDemo({ onDismiss }: { onDismiss: () => void }) {
       <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" className="h-16 flex-1 justify-center overflow-hidden rounded-2xl px-3" style={{ backgroundColor: colors.surfaceRaised }}>
         <View className="h-2 w-3/4 rounded-full opacity-35" style={{ backgroundColor: colors.textMuted }} />
         <View className="mt-2 h-2 w-1/2 rounded-full opacity-25" style={{ backgroundColor: colors.textMuted }} />
-        <Animated.View className="absolute right-4 h-10 w-10 items-center justify-center rounded-full" style={[bubbleStyle, { backgroundColor: colors.primary }]}>
-          <View className="h-4 w-4 rounded-full border-2" style={{ borderColor: colors.onPrimary }} />
+        <Animated.View className="absolute right-4 h-10 w-10 items-center justify-center" style={bubbleStyle}>
+          <BubbleGlyph size={36} reducedMotion={reducedMotion} />
         </Animated.View>
       </View>
       <View className="ms-3 flex-1">

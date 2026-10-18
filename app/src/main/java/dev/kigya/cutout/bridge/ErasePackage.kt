@@ -26,6 +26,7 @@ import dagger.hilt.components.SingletonComponent
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface EraseEntryPoint {
+    fun mainActivityState(): dev.kigya.cutout.MainActivityState
     fun permissions(): PermissionCenter
     fun preferences(): BubblePreferences
     fun navigator(): SettingsNavigator
@@ -63,6 +64,7 @@ class ErasePackage : BaseReactPackage() {
             entry.window(),
             entry.gallery(),
             entry.images(),
+            entry.mainActivityState(),
         )
     }
 

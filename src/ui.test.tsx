@@ -102,6 +102,9 @@ afterEach(() => {
 
 beforeEach(() => {
   for (const mock of Object.values(erase)) mock.mockReset();
+  erase.getOnboardingCompleted.mockResolvedValue(true);
+  erase.completeOnboarding.mockResolvedValue(undefined);
+  erase.getBubbleAppearance.mockResolvedValue({ sizeDp: 64, opacity: 0.7, shrinkWhenIdle: false, shrinkToDot: false });
   delete erase.getPreferences;
   delete erase.setPreferences;
   delete erase.logProductEvent;

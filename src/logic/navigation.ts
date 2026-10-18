@@ -1,4 +1,4 @@
-export type AppRoute = 'home' | 'feedback' | 'settings' | 'language' | 'processing' | 'result' | 'editor';
+export type AppRoute = 'home' | 'feedback' | 'settings' | 'language' | 'bubble-size' | 'bubble-opacity' | 'processing' | 'result' | 'editor';
 
 export function backTarget(route: AppRoute): AppRoute | null {
   switch (route) {
@@ -6,6 +6,8 @@ export function backTarget(route: AppRoute): AppRoute | null {
       return null;
     case 'feedback':
     case 'language':
+    case 'bubble-size':
+    case 'bubble-opacity':
       return 'settings';
     case 'settings':
     case 'processing':

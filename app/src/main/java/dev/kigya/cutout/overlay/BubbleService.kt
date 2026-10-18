@@ -30,6 +30,7 @@ import dev.kigya.cutout.EraseApp
 import dev.kigya.cutout.MainActivity
 import dev.kigya.cutout.locale.AppLocales
 import dev.kigya.cutout.R
+import dev.kigya.cutout.data.BubbleAppearance
 import dev.kigya.cutout.data.BubblePreferences
 import com.facebook.react.interfaces.fabric.ReactSurface
 import dagger.hilt.android.AndroidEntryPoint
@@ -50,8 +51,11 @@ class BubbleService : LifecycleService() {
     private lateinit var params: WindowManager.LayoutParams
     private val mainHandler = Handler(Looper.getMainLooper())
     private var root: OverlayRoot? = null
+    private var stopping = false
     private var surface: ReactSurface? = null
     private var latestState = BubbleUiState()
+    private var appearance = BubbleAppearance()
+    private val chipSizeDp: Int get() = appearance.sizeDp + 8
     private var acknowledgedGeometryRevision = -1L
     private var geometryKey: GeometryKey? = null
     private var clampAnimator: ValueAnimator? = null
@@ -85,7 +89,6 @@ class BubbleService : LifecycleService() {
             return
         }
         try {
-            attach()
             val foregroundType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
             } else {
@@ -104,6 +107,35 @@ class BubbleService : LifecycleService() {
             return
         }
         lifecycleScope.launch {
+            if (!preferences.enabled.first() || stopping || !Settings.canDrawOverlays(this@BubbleService)) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return@launch
+            }
+            try {
+                appearance = preferences.appearance.first()
+                presenter.start()
+                attach()
+                lifecycleScope.launch {
+                    preferences.appearance.collect { next ->
+                        if (next != appearance) {
+                            val oldSize = bubblePx()
+                            appearance = next
+                            if (latestState.anchorEnd) preciseX += oldSize - bubblePx()
+                            root?.updateChipSize(bubblePx())
+                            applyGeometry(latestState, forcePublish = true)
+                            preferences.setSpot(preciseX, preciseY)
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                Log.e(TAG, "overlay attach failed", error)
+                presenter.stop()
+                detach()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return@launch
+            }
             preferences.spot.first()?.let { spot ->
                 val frame = frame()
                 val chip = bubblePx()
@@ -125,6 +157,9 @@ class BubbleService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_HIDE) {
+            stopping = true
+            presenter.stop()
+            detach()
             appScope.launch { preferences.setEnabled(false) }
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -138,6 +173,8 @@ class BubbleService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        stopping = true
+        presenter.stop()
         cancelClampAnimation()
         root?.removeCallbacks(layoutFrameCallback)
         layoutFramePosted = false
@@ -147,6 +184,7 @@ class BubbleService : LifecycleService() {
         window.resize = null
         window.acknowledgeGeometry = null
         window.clearGeometry()
+        window.setInteracting(false)
         detach()
         super.onDestroy()
     }
@@ -217,6 +255,7 @@ class BubbleService : LifecycleService() {
         view.layout(0, 0, surfaceWidth, surfaceHeight)
         created.start()
         surface = created
+        (application as EraseApp).bubbleLifecycle.attach()
         val container = OverlayRoot(
             context = this,
             chipPx = bubble,
@@ -225,9 +264,10 @@ class BubbleService : LifecycleService() {
             // new viewport, so latestState would move the touch target early.
             chipLeft = { view.translationX + dp(CHIP_SURFACE_LEFT_DP) },
             slop = ViewConfiguration.get(this).scaledTouchSlop,
-            onChipDown = { cancelClampAnimation() },
+            onChipDown = { cancelClampAnimation(); window.setInteracting(true) },
             onDragStart = { cancelClampAnimation() },
             onViewportLayout = { onTargetViewportLaidOut() },
+            onGestureEnd = { window.setInteracting(false) },
             onDrag = { dx, dy -> dragBy(dx, dy) },
             onDrop = { dragEnd() },
             onCancel = {
@@ -358,6 +398,7 @@ class BubbleService : LifecycleService() {
     }
 
     private fun detach() {
+        (application as EraseApp).bubbleLifecycle.detach()
         surface?.stop()
         surface = null
         root?.let { view ->
@@ -469,7 +510,7 @@ class BubbleService : LifecycleService() {
     }
 
     private fun viewport(state: BubbleUiState, display: Frame = frame()): Pair<Int, Int> =
-        if (state.expanded) expandedWidthDp(display) to phaseHeight(state, display) else CHIP_SIZE_DP to CHIP_SIZE_DP
+        if (state.expanded) expandedWidthDp(display) to phaseHeight(state, display) else chipSizeDp to chipSizeDp
 
     private fun phaseHeight(state: BubbleUiState, display: Frame = frame()): Int = minOf(when (state.phase) {
         BubblePhase.Working -> WORKING_HEIGHT_DP
@@ -478,21 +519,21 @@ class BubbleService : LifecycleService() {
         BubblePhase.Idle -> IDLE_HEIGHT_DP
     }, availableHeightDp(display))
 
-    private fun expandedWidthDp(display: Frame): Int = minOf(EXPANDED_WIDTH_DP, availableWidthDp(display))
+    private fun expandedWidthDp(display: Frame): Int = minOf((chipSizeDp + GAP_DP + PANEL_WIDTH_DP), availableWidthDp(display))
 
     private fun panelWidthDp(state: BubbleUiState, display: Frame): Int =
-        if (state.expanded) (expandedWidthDp(display) - CHIP_SIZE_DP - GAP_DP).coerceAtLeast(0) else PANEL_WIDTH_DP
+        if (state.expanded) (expandedWidthDp(display) - chipSizeDp - GAP_DP).coerceAtLeast(0) else PANEL_WIDTH_DP
 
     private fun availableWidthDp(display: Frame): Int =
         ((display.width - display.left - display.right - 2 * dp(MARGIN_DP)).coerceAtLeast(0) /
-            resources.displayMetrics.density).roundToInt().coerceAtLeast(CHIP_SIZE_DP)
+            resources.displayMetrics.density).roundToInt().coerceAtLeast(chipSizeDp)
 
     private fun availableHeightDp(display: Frame): Int =
         ((display.height - display.top - display.bottom - 2 * dp(MARGIN_DP)).coerceAtLeast(0) /
-            resources.displayMetrics.density).roundToInt().coerceAtLeast(CHIP_SIZE_DP)
+            resources.displayMetrics.density).roundToInt().coerceAtLeast(chipSizeDp)
 
     private fun visibleChipLeft(state: BubbleUiState): Float =
-        if (state.expanded && state.anchorEnd) dp(viewport(state).first - CHIP_SIZE_DP).toFloat() else 0f
+        if (state.expanded && state.anchorEnd) dp(viewport(state).first - chipSizeDp).toFloat() else 0f
 
     private fun surfaceTranslationX(state: BubbleUiState): Float =
         visibleChipLeft(state) - dp(CHIP_SURFACE_LEFT_DP)
@@ -509,13 +550,15 @@ class BubbleService : LifecycleService() {
         window.publishGeometry(
             BubbleGeometry(
                 revision = window.nextGeometryRevision(),
+                stateRevision = state.revision,
+                phase = state.phase,
                 expanded = state.expanded,
                 anchorEnd = state.anchorEnd,
                 windowWidthDp = windowWidth,
                 windowHeightDp = windowHeight,
                 surfaceWidthDp = SURFACE_WIDTH_DP,
                 surfaceHeightDp = SURFACE_HEIGHT_DP,
-                chipSizeDp = CHIP_SIZE_DP,
+                chipSizeDp = chipSizeDp,
                 panelWidthDp = panelWidthDp(state, display),
                 panelHeightDp = phaseHeight(state, display),
                 chipLeftDp = CHIP_SURFACE_LEFT_DP,
@@ -532,7 +575,7 @@ class BubbleService : LifecycleService() {
     }
 
     private fun windowOriginForChip(chipX: Float, state: BubbleUiState): Int =
-        (chipX - if (state.expanded && state.anchorEnd) dp(viewport(state).first - CHIP_SIZE_DP) else 0).roundToInt()
+        (chipX - if (state.expanded && state.anchorEnd) dp(viewport(state).first - chipSizeDp) else 0).roundToInt()
 
     private fun clampChipImmediately(display: Frame, fitPanel: Boolean = true) {
         val (targetX, targetY) = clampTarget(display, fitPanel)
@@ -589,11 +632,11 @@ class BubbleService : LifecycleService() {
     }
 
     private fun expandedLeftExtentPx(): Int =
-        if (latestState.expanded && latestState.anchorEnd) dp(viewport(latestState).first - CHIP_SIZE_DP) else 0
+        if (latestState.expanded && latestState.anchorEnd) dp(viewport(latestState).first - chipSizeDp) else 0
 
     private fun expandedRightExtentPx(): Int = when {
         !latestState.expanded -> bubblePx()
-        latestState.anchorEnd -> dp(CHIP_SIZE_DP)
+        latestState.anchorEnd -> dp(chipSizeDp)
         else -> dp(viewport(latestState).first)
     }
 
@@ -601,7 +644,7 @@ class BubbleService : LifecycleService() {
 
     private fun dp(value: Float): Int = (value * resources.displayMetrics.density).roundToInt()
 
-    private fun bubblePx(): Int = dp(CHIP_SIZE_DP)
+    private fun bubblePx(): Int = dp(chipSizeDp)
 
     private fun createChannel() {
         val manager = getSystemService(NotificationManager::class.java)
@@ -641,12 +684,10 @@ class BubbleService : LifecycleService() {
         private const val CHANNEL_ID = "bubble"
         private const val NOTIFICATION_ID = 27
         private const val TAG = "BubbleService"
-        private const val CHIP_SIZE_DP = 84
         private const val CHIP_SURFACE_LEFT_DP = 272
-        private const val SURFACE_WIDTH_DP = 628
+        private const val SURFACE_WIDTH_DP = 640
         private const val SURFACE_HEIGHT_DP = 400
         private const val PANEL_WIDTH_DP = 260
-        private const val EXPANDED_WIDTH_DP = 356
         private const val IDLE_HEIGHT_DP = 260
         private const val WORKING_HEIGHT_DP = 340
         private const val RESULT_HEIGHT_DP = 400
@@ -658,7 +699,7 @@ class BubbleService : LifecycleService() {
 
 private class OverlayRoot(
     context: android.content.Context,
-    private val chipPx: Int,
+    private var chipPx: Int,
     private val chipLeft: () -> Float,
     private val slop: Int,
     private val onChipDown: () -> Unit,
@@ -667,7 +708,10 @@ private class OverlayRoot(
     private val onDrag: (Float, Float) -> Unit,
     private val onDrop: () -> Unit,
     private val onCancel: () -> Unit,
+    private val onGestureEnd: () -> Unit = {},
 ) : android.widget.FrameLayout(context) {
+    fun updateChipSize(value: Int) { chipPx = value }
+
     private var tracking = false
     private var dragging = false
     private var translationAfterLayout: Float? = null
@@ -693,7 +737,9 @@ private class OverlayRoot(
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.action == MotionEvent.ACTION_OUTSIDE) return true
-        return super.dispatchTouchEvent(event)
+        val handled = super.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) onGestureEnd()
+        return handled
     }
 
     override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {

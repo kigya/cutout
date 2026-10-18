@@ -1,5 +1,6 @@
+import { MainAppState as AppState } from '../native/MainAppState';
 import { memo, useEffect, useState } from 'react';
-import { AccessibilityInfo, AppState, View } from 'react-native';
+import { AccessibilityInfo, View } from 'react-native';
 import { Canvas, Image, LinearGradient, Rect, useImage, vec, type SkImage } from '@shopify/react-native-skia';
 import { Easing, useDerivedValue, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { previewFrame } from '../logic/preview';

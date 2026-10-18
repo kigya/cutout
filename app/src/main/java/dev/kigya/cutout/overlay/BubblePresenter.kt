@@ -3,6 +3,7 @@ package dev.kigya.cutout.overlay
 import android.content.Context
 import android.content.Intent
 import dev.kigya.cutout.MainActivity
+import dev.kigya.cutout.MainActivityState
 import dev.kigya.cutout.cutout.CutListener
 import dev.kigya.cutout.cutout.CutOutcome
 import dev.kigya.cutout.cutout.ImageCutter
@@ -17,6 +18,10 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -31,16 +36,22 @@ class BubblePresenter @Inject constructor(
     private val picks: PickBus,
     private val reads: ClipboardBus,
     private val images: ClipboardImages,
+    private val mainActivity: MainActivityState = MainActivityState(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val telemetry by lazy { dev.kigya.cutout.data.AppTelemetry(context) }
     private var activeCut = false
+    private var enabled = false
+    private var clipboardJob: Job? = null
+    private var pickerPending = false
     private val _state = MutableStateFlow(BubbleUiState())
     val state = _state.asStateFlow()
 
     init {
         scope.launch {
             picks.bubblePicks.collect { image ->
+            if (!enabled || !pickerPending) return@collect
+            pickerPending = false
             if (image == null) {
                 mutate {
                     it.copy(
@@ -56,11 +67,32 @@ class BubblePresenter @Inject constructor(
         }
         }
         scope.launch {
-            reads.reads.collect { read -> onClipboard(read) }
+            mainActivity.state.map { it.visible }.distinctUntilChanged().collect { collapse() }
         }
     }
 
+    fun start() {
+        enabled = true
+        collapse()
+    }
+
+    fun stop() {
+        enabled = false
+        collapse()
+    }
+
     fun onEvent(event: BubbleUiEvent) {
+        if (event == BubbleUiEvent.Collapse || event == BubbleUiEvent.Dismiss) {
+            collapse()
+            return
+        }
+        if (!enabled) return
+        if (mainActivity.state.value.visible) {
+            collapse()
+            return
+        }
+        if ((activeCut || _state.value.readingClipboard || pickerPending) &&
+            event != BubbleUiEvent.Toggle) return
         when (event) {
             BubbleUiEvent.Toggle -> if (_state.value.expanded) collapse() else expand()
             BubbleUiEvent.Dismiss -> collapse()
@@ -69,10 +101,7 @@ class BubblePresenter @Inject constructor(
                 mutate {
                     it.copy(
                         readingClipboard = true,
-                        phase = BubblePhase.Working,
                         message = null,
-                        previewPath = null,
-                        percent = 8,
                     )
                 }
                 openClipboard(consume = true)
@@ -94,7 +123,13 @@ class BubblePresenter @Inject constructor(
     }
 
     private fun mutate(block: (BubbleUiState) -> BubbleUiState) {
-        _state.update { current -> block(current).copy(revision = current.revision + 1) }
+        _state.update { current ->
+            val next = block(current)
+            next.copy(
+                revision = current.revision + 1,
+                expanded = next.expanded && enabled && !mainActivity.state.value.visible,
+            )
+        }
     }
 
     fun setAnchorEnd(anchorEnd: Boolean) {
@@ -102,18 +137,22 @@ class BubblePresenter @Inject constructor(
     }
 
     fun collapse() {
+        clipboardJob?.cancel()
+        clipboardJob = null
+        reads.cancelBubble()
+        picks.cancelBubble()
+        pickerPending = false
         if (!_state.value.expanded && !_state.value.readingClipboard) return
         mutate { it.copy(expanded = false, readingClipboard = false) }
     }
 
     private fun expand() {
-        val ready = runCatching { images.hasPicture() }.getOrDefault(false)
         mutate { current ->
             val fresh = current.phase == BubblePhase.Idle
             current.copy(
                 expanded = true,
                 readingClipboard = false,
-                clipboardReady = ready,
+                clipboardReady = true,
                 phase = if (fresh) BubblePhase.Idle else current.phase,
                 message = if (fresh) null else current.message,
                 previewPath = if (fresh) null else current.previewPath,
@@ -160,16 +199,33 @@ class BubblePresenter @Inject constructor(
                     )
                 }
             }
+            ClipboardLook.NoFocus -> mutate {
+                it.copy(readingClipboard = false, phase = BubblePhase.Failed, message = Messages.CLIPBOARD_NO_FOCUS)
+            }
         }
     }
 
     private fun openClipboard(consume: Boolean) {
+        val pending = reads.awaitBubble()
+        val requestId = reads.bubbleRequestId
         val intent = Intent(context, ClipboardActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)
             .putExtra(ClipboardActivity.EXTRA_CONSUME, consume)
+            .putExtra(ClipboardActivity.EXTRA_REQUEST, requestId)
         try {
             context.startActivity(intent)
+            clipboardJob = scope.launch {
+                try {
+                    val look = withTimeoutOrNull(5_000) { pending.await() }
+                    if (enabled && _state.value.readingClipboard) {
+                        onClipboard(ClipboardRead(look ?: ClipboardLook.NoFocus, consume, requestId))
+                    }
+                } finally {
+                    reads.cancelBubble(requestId)
+                }
+            }
         } catch (_: Exception) {
+            reads.cancelBubble(requestId)
             mutate {
                 it.copy(
                     readingClipboard = false,
@@ -182,13 +238,18 @@ class BubblePresenter @Inject constructor(
 
     private fun openPicker(mode: String) {
         collapse()
+        val requestId = picks.beginBubble()
+        pickerPending = true
         val intent = Intent(context, PickerActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             .putExtra(PickerActivity.EXTRA_MODE, mode)
             .putExtra(PickerActivity.EXTRA_TARGET, PickBus.TARGET_BUBBLE)
+            .putExtra(PickerActivity.EXTRA_REQUEST, requestId)
         try {
             context.startActivity(intent)
         } catch (_: Exception) {
+            pickerPending = false
+            picks.cancelBubble()
             mutate {
                 it.copy(
                     phase = BubblePhase.Failed,

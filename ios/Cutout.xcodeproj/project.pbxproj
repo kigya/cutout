@@ -20,6 +20,7 @@
 		AA0000000000000000000007 /* fixture.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* fixture.png */; };
 		DF0A9F120108E3130A856059 /* Pods_Cutout.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FC402232901393EB9D89D8DA /* Pods_Cutout.framework */; };
 		FB47C73DA4A008612C7C74C7 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
+		AC0180000000000000000001 /* Manrope.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AC0180000000000000000002 /* Manrope.ttf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -75,6 +76,7 @@
 		AA0000000000000000000009 /* Cutout-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Cutout/Cutout-Bridging-Header.h"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		FC402232901393EB9D89D8DA /* Pods_Cutout.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Cutout.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		AC0180000000000000000002 /* Manrope.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; name = Manrope.ttf; path = ../assets/fonts/Manrope.ttf; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -293,6 +295,7 @@
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				AA0000000000000000000005 /* isnet.onnx in Resources */,
 				AA0000000000000000000007 /* fixture.png in Resources */,
+				AC0180000000000000000001 /* Manrope.ttf in Resources */,
 				FB47C73DA4A008612C7C74C7 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

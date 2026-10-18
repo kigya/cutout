@@ -12,6 +12,8 @@ Cutout processes images on your device with a bundled ISNet model. On Android, a
 - Remove its background offline, then refine the mask with erase and restore brushes.
 - Zoom and pan with two fingers, compare with the original, and undo or redo up to 50 strokes.
 - Copy a transparent PNG or save it. SVG files with a separate solid background can retain their vector format; other SVGs use a raster fallback.
+- Preview the workflow in a three-page introduction, shown until you complete it.
+- Adjust the Android Bubble size and opacity, or let it shrink while idle.
 - Use the system, light, or dark appearance on phone and tablet layouts.
 
 The Bubble is off by default. Android asks for overlay access only when you choose to enable it. Background removal inside Cutout works without overlay or notification permission. Manufacturer-specific settings are shown only where applicable.

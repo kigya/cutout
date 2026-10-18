@@ -279,12 +279,52 @@ class ClipboardImagesTest {
         assertRaster(images.peek(), expected)
     }
 
+    @Test fun `SVG-looking bytes with an opaque binary name remain a raster image`() {
+        val bytes = "<svg viewBox=\"0 0 1 1\"><path d=\"M0 0\"/></svg>".toByteArray()
+        val uri = source("opaque.bin", "application/octet-stream", bytes)
+        clipboard.setPrimaryClip(ClipData.newUri(app.contentResolver, "file", uri))
+
+        assertRaster(images.peek(), bytes)
+    }
+
     @Test fun `returns unreadable when opening a URI yields no stream`() {
         sourceProvider.emptyStreams += "empty-stream.png"
         val uri = source("empty-stream.png", "image/png", byteArrayOf(1, 2, 3))
         clipboard.setPrimaryClip(ClipData.newUri(app.contentResolver, "image", uri))
 
         assertEquals(ClipboardLook.Unreadable, images.peek())
+    }
+
+    @Test fun `returns unreadable when provider throws a non-permission read error`() {
+        sourceProvider.readFailures += "io-failure.png"
+        val uri = source("io-failure.png", "image/png", byteArrayOf(1, 2, 3))
+        clipboard.setPrimaryClip(ClipData.newUri(app.contentResolver, "image", uri))
+
+        assertEquals(ClipboardLook.Unreadable, images.peek())
+    }
+
+    @Test fun `URI remains usable when platform text coercion throws`() {
+        val bytes = byteArrayOf(9, 8, 7)
+        val uri = source("coercion-failure.png", "image/png", bytes)
+        val item = mockk<ClipData.Item>()
+        every { item.text } returns null
+        every { item.uri } returns uri
+        every { item.intent } returns null
+        every { item.htmlText } returns null
+        every { item.coerceToText(app) } throws SecurityException("text coercion denied")
+        clipboard.setPrimaryClip(ClipData(ClipDescription("image", arrayOf("image/png")), item))
+
+        assertRaster(images.peek(), bytes)
+    }
+
+    @Test fun `publishing fails explicitly when clipboard service disappears`() {
+        val context = spyk(app)
+        every { context.getSystemService(ClipboardManager::class.java) } returns null
+
+        val error = runCatching { ClipboardImages(context).publish(byteArrayOf(1, 2, 3), "png") }.exceptionOrNull()
+
+        assertTrue(error is IllegalStateException)
+        assertEquals("Clipboard unavailable", error?.message)
     }
 
     @Test fun `does not treat arbitrary text as an SVG document`() {
@@ -354,12 +394,14 @@ class ClipboardImagesTest {
     @After fun tearDown() {
         sourceProvider.denied.clear()
         sourceProvider.emptyStreams.clear()
+        sourceProvider.readFailures.clear()
         File(app.filesDir, "cutouts").deleteRecursively()
     }
 
     private class SourceProvider(private val app: Application) : ContentProvider() {
         val denied = mutableSetOf<String>()
         val emptyStreams = mutableSetOf<String>()
+        val readFailures = mutableSetOf<String>()
         private val values = mutableMapOf<String, Pair<String, ByteArray>>()
 
         fun add(name: String, mime: String, bytes: ByteArray): Uri {
@@ -382,6 +424,7 @@ class ClipboardImagesTest {
         override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
             val name = uri.lastPathSegment.orEmpty()
             if (name in denied) throw SecurityException("read denied")
+            if (name in readFailures) throw java.io.IOException("provider read failed")
             val bytes = values[name]?.second ?: throw FileNotFoundException(name)
             val file = File(app.cacheDir, "clipboard-source-$name").apply { writeBytes(bytes) }
             return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)

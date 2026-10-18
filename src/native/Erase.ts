@@ -30,6 +30,7 @@ export type EditSession = {
 };
 
 export type BubbleSnapshot = {
+  actionMessage?: string;
   revision?: number;
   taskId?: string;
   stage?: string;
@@ -48,6 +49,8 @@ export type BubbleSnapshot = {
 /** Native WindowManager geometry; its revision is independent of processing state. */
 export type BubbleGeometry = {
   revision: number;
+  stateRevision?: number;
+  phase?: BubbleSnapshot['phase'];
   expanded: boolean;
   anchorEnd: boolean;
   windowWidthDp: number;
@@ -72,9 +75,16 @@ export type MaskResult = {
   message?: string;
 };
 
+export type BubbleAppearance = { sizeDp: number; opacity: number; shrinkWhenIdle: boolean; shrinkToDot: boolean };
 export type AppPreferences = { theme: 'system' | 'light' | 'dark'; analytics: boolean; crashes: boolean; diagnosticsNoticePending?: boolean };
+export type MainActivitySnapshot = { revision: number; visible: boolean; resumed: boolean };
 
 type EraseNative = {
+  getOnboardingCompleted(): Promise<boolean>;
+  completeOnboarding(): Promise<void>;
+  getBubbleAppearance(): Promise<BubbleAppearance>;
+  setBubbleAppearance(sizeDp: number, opacity: number, shrinkWhenIdle: boolean, shrinkToDot: boolean): Promise<BubbleAppearance>;
+  getMainActivityState?(): Promise<MainActivitySnapshot>;
   getPreferences?(): Promise<AppPreferences>;
   setPreferences?(theme: string, analytics: boolean, crashes: boolean): Promise<void>;
   logProductEvent?(name: string, values: Record<string, string | number | boolean>): Promise<void>;

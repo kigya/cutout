@@ -217,6 +217,23 @@ class ImageCutterTest {
     }
 
     @Test
+    fun `rasterized SVG dimensions are scaled to the maximum supported side`() = runTest {
+        val remover = mockk<BackgroundRemover>()
+        coEvery { remover.prepare() } returns Result.success(Unit)
+        coEvery { remover.cut(any()) } returns Removal.SubjectNotFound
+        val listener = RecordingListener()
+
+        val outcome = cutter(remover).cut(
+            IncomingImage.Svg("""<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="2"><circle cx="2" cy="1" r="1"/></svg>"""),
+            listener,
+        )
+
+        assertTrue(outcome is CutOutcome.Manual)
+        coVerify(exactly = 1) { remover.cut(match { it.width == 2048 && it.height == 1 }) }
+        assertEquals(listOf(8, 18, 28, 92, 100), listener.progress)
+    }
+
+    @Test
     fun `cut fixture decodes the bundled sample and delegates to the regular cut pipeline`() = runTest {
         val remover = mockk<BackgroundRemover>()
         coEvery { remover.prepare() } returns Result.success(Unit)
@@ -298,6 +315,27 @@ class ImageCutterTest {
         val afterCancel = subject.cut(IncomingImage.Invalid("after"))
         assertEquals(CutOutcome.Failed("after"), afterCancel)
         assertFalse(first.isActive)
+    }
+
+    @Test
+    fun `cancellation during model inference recycles input and releases the cutter`() = runTest {
+        val remover = mockk<BackgroundRemover>()
+        val entered = CompletableDeferred<Bitmap>()
+        coEvery { remover.prepare() } returns Result.success(Unit)
+        coEvery { remover.cut(any()) } coAnswers {
+            entered.complete(firstArg())
+            kotlinx.coroutines.awaitCancellation()
+        }
+        val subject = cutter(remover)
+        val cut = async { subject.cut(IncomingImage.Raster(sourcePng())) }
+        runCurrent()
+        val inferenceInput = entered.await()
+
+        cut.cancelAndJoin()
+
+        assertTrue(inferenceInput.isRecycled)
+        assertEquals(CutOutcome.Failed("available after cancellation"), subject.cut(IncomingImage.Invalid("available after cancellation")))
+        coVerify(exactly = 1) { remover.cut(any()) }
     }
 
     @Test

@@ -31,6 +31,8 @@ class PickerActivity : ComponentActivity() {
         enableEdgeToEdge()
         if (intent.getStringExtra(EXTRA_TARGET) == PickBus.TARGET_EDITOR &&
             !bus.attachEditor(this, intent.getStringExtra(EXTRA_REQUEST))) { finish(); return }
+        if (intent.getStringExtra(EXTRA_TARGET) == PickBus.TARGET_BUBBLE &&
+            !bus.attachBubble(this, intent.getStringExtra(EXTRA_REQUEST))) { finish(); return }
         if (savedInstanceState != null) return
         when (intent.getStringExtra(EXTRA_MODE)) {
             MODE_FILE -> file.launch(arrayOf("image/*", "image/svg+xml"))

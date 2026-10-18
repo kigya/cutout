@@ -143,6 +143,8 @@ jest.mock('react-native-reanimated', () => {
     },
     useAnimatedStyle: style => style(),
     useDerivedValue: compute => ({ value: compute() }),
+    cancelAnimation: jest.fn(),
+    interpolate: (_value, _input, output) => output[0],
     withTiming: value => value,
     withDelay: (_delay, value) => value,
     withRepeat: value => value,
@@ -268,6 +270,10 @@ jest.mock('@shopify/react-native-skia', () => ({
 }));
 
 const mockErase = {
+  getOnboardingCompleted: jest.fn(async () => true),
+  completeOnboarding: jest.fn(async () => undefined),
+  getBubbleAppearance: jest.fn(async () => ({ sizeDp: 64, opacity: 0.7, shrinkWhenIdle: false, shrinkToDot: false })),
+  setBubbleAppearance: jest.fn(async (sizeDp, opacity, shrinkWhenIdle, shrinkToDot) => ({ sizeDp, opacity, shrinkWhenIdle, shrinkToDot })),
   getHome: jest.fn(async () => ({ rows: [], bubbleEnabled: false, showXiaomiTip: false, clipboardReady: false })),
   prepareModel: jest.fn(async () => 'ready'),
   setBubble: jest.fn(async () => undefined),

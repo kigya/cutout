@@ -12,6 +12,27 @@ import kotlinx.coroutines.flow.asSharedFlow
 class PickBus @Inject constructor() {
     private val bubbleFlow = MutableSharedFlow<IncomingImage?>(extraBufferCapacity = 1)
     val bubblePicks = bubbleFlow.asSharedFlow()
+    @Volatile var bubbleRequestId: String? = null
+        private set
+    private var bubbleActivity: java.lang.ref.WeakReference<android.app.Activity>? = null
+
+    @Synchronized fun beginBubble(): String {
+        cancelBubble()
+        return java.util.UUID.randomUUID().toString().also { bubbleRequestId = it }
+    }
+
+    @Synchronized fun attachBubble(activity: android.app.Activity, requestId: String?): Boolean {
+        if (requestId == null || requestId != bubbleRequestId) return false
+        bubbleActivity = java.lang.ref.WeakReference(activity)
+        return true
+    }
+
+    @Synchronized fun cancelBubble() {
+        val owner = bubbleActivity?.get()
+        bubbleRequestId = null
+        bubbleActivity = null
+        owner?.runOnUiThread { owner.finish() }
+    }
     @Volatile var editorRequestId: String? = null
         private set
     private var editorActivity: java.lang.ref.WeakReference<android.app.Activity>? = null
@@ -43,6 +64,9 @@ class PickBus @Inject constructor() {
                 pending?.complete(image)
             }
         } else {
+            if (requestId == null || requestId != bubbleRequestId) return
+            bubbleRequestId = null
+            bubbleActivity = null
             bubbleFlow.tryEmit(image)
         }
     }
@@ -57,6 +81,9 @@ class PickBus @Inject constructor() {
             pending?.complete(null)
             owner?.runOnUiThread { owner.finish() }
         } else {
+            if (requestId == null || requestId != bubbleRequestId) return
+            bubbleRequestId = null
+            bubbleActivity = null
             bubbleFlow.tryEmit(null)
         }
     }

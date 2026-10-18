@@ -13,6 +13,8 @@ type Props = {
   notice?: string;
   onBack: () => void;
   onLanguage: () => void;
+  onBubbleSize?: () => void;
+  onBubbleOpacity?: () => void;
   themeMode?: ThemeMode;
   onThemeModeChange?: (mode: ThemeMode) => void;
   analyticsEnabled?: boolean;
@@ -23,7 +25,7 @@ type Props = {
   onFeedback?: () => void;
 };
 
-export function SettingsScreen({ notice = '', showXiaomiTip, onBack, onLanguage, themeMode = 'system', onThemeModeChange, analyticsEnabled = true, crashEnabled = true, onAnalyticsChange, onCrashChange, onOpenPrivacy, onFeedback }: Props) {
+export function SettingsScreen({ notice = '', showXiaomiTip, onBack, onLanguage, onBubbleSize, onBubbleOpacity, themeMode = 'system', onThemeModeChange, analyticsEnabled = true, crashEnabled = true, onAnalyticsChange, onCrashChange, onOpenPrivacy, onFeedback }: Props) {
   const { t } = useLocale();
   const { colors } = useTheme();
   const [sheet, setSheet] = useState<'flow' | 'licenses' | 'bubble' | 'clipboard' | 'save' | 'editor' | 'model' | null>(null);
@@ -62,6 +64,7 @@ export function SettingsScreen({ notice = '', showXiaomiTip, onBack, onLanguage,
       <BackButton onPress={onBack} />
       <Text className="mt-2 text-3xl font-semibold" style={{ color: colors.text }}>{t('settings')}</Text>
       <Notice message={notice} />
+      {Platform.OS === 'android' ? <><Text className="mb-1 mt-6 text-sm font-medium" style={{ color: colors.textMuted }}>{t('bubble')}</Text>{onBubbleSize ? <Row label={t('bubbleSize')} onPress={onBubbleSize} colors={colors} /> : null}{onBubbleOpacity ? <Row label={t('bubbleOpacity')} onPress={onBubbleOpacity} colors={colors} /> : null}</> : null}
       <Row label={t('language')} onPress={onLanguage} colors={colors} />
       <Row label={t('howItWorks')} onPress={() => setSheet('flow')} colors={colors} />
       <Row label={t('licenses')} onPress={() => setSheet('licenses')} colors={colors} />

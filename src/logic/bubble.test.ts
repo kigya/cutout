@@ -10,7 +10,7 @@ describe('bubble', () => {
   });
 
   test('the panel grows with the phase and stays a chip when closed', () => {
-    expect(bubbleFrame({ expanded: false, phase: 'idle', editReady: false })).toEqual({ width: 84, height: 84 });
+    expect(bubbleFrame({ expanded: false, phase: 'idle', editReady: false })).toEqual({ width: 72, height: 72 });
     expect(bubbleFrame({ expanded: true, phase: 'idle', editReady: false }).height).toBe(260);
     expect(bubbleFrame({ expanded: true, phase: 'working', editReady: false }).height).toBe(340);
     expect(bubbleFrame({ expanded: true, phase: 'copied', editReady: true }).height).toBe(400);

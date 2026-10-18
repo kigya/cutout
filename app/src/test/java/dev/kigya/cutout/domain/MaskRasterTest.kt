@@ -67,4 +67,11 @@ class MaskRasterTest {
             boundsOfAlpha(intArrayOf(0x08ffffff, 0x08ffffff, 0x08ffffff, 0x08ffffff), 2, 2, 8),
         )
     }
+
+    @Test
+    fun alphaBoundsRejectNegativeWidthEvenWhenTheHeightIsPositive() {
+        // Invalid dimensions must not be mistaken for a one-pixel result. This exercises the
+        // second empty-bounds guard after the left/right check has evaluated false.
+        assertNull(boundsOfAlpha(IntArray(0), width = -1, height = 1, minAlpha = 1))
+    }
 }

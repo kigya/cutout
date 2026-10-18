@@ -14,6 +14,8 @@ import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
 class EraseApp : Application(), ReactApplication {
+    @javax.inject.Inject lateinit var mainActivityState: MainActivityState
+    val bubbleLifecycle by lazy { dev.kigya.cutout.overlay.BubbleReactLifecycle({ reactHost }, mainActivityState) }
     override val reactHost: ReactHost by lazy {
         val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         getDefaultReactHost(
@@ -32,6 +34,10 @@ class EraseApp : Application(), ReactApplication {
     override fun onCreate() {
         super.onCreate()
         dev.kigya.cutout.data.AppTelemetry(this).applyConsent()
+        com.facebook.react.common.assets.ReactFontManager.getInstance().addCustomFont(
+            "Manrope",
+            android.graphics.Typeface.createFromAsset(assets, "fonts/Manrope.ttf"),
+        )
         loadReactNative(this)
     }
 }

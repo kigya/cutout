@@ -30,13 +30,15 @@ data class BubbleGeometry(
     val anchorEnd: Boolean,
     val windowWidthDp: Int,
     val windowHeightDp: Int,
-    val surfaceWidthDp: Int = 628,
+    val surfaceWidthDp: Int = 640,
     val surfaceHeightDp: Int = 400,
-    val chipSizeDp: Int = 84,
+    val chipSizeDp: Int = 72,
     val panelWidthDp: Int = 260,
     val panelHeightDp: Int = 260,
     val chipLeftDp: Int = 272,
     val chipTopDp: Int = 0,
+    val stateRevision: Int = 0,
+    val phase: BubblePhase = BubblePhase.Idle,
 )
 
 sealed interface BubbleUiEvent {

@@ -13,6 +13,36 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnable
 import com.facebook.react.defaults.DefaultReactActivityDelegate
 
 class MainActivity : ReactActivity() {
+    private val app: EraseApp get() = application as EraseApp
+
+    override fun onStart() {
+        app.mainActivityState.started(this)
+        super.onStart()
+    }
+
+    override fun onResume() {
+        app.bubbleLifecycle.beforeActivityResume()
+        super.onResume()
+        app.mainActivityState.resumed(this)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        app.mainActivityState.paused(this)
+        app.bubbleLifecycle.afterActivityCallback()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        app.mainActivityState.stopped(this)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        app.mainActivityState.destroyed(this)
+        app.bubbleLifecycle.afterActivityCallback()
+    }
+
     override fun getMainComponentName(): String = "Erase"
 
     override fun createReactActivityDelegate(): ReactActivityDelegate =

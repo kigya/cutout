@@ -10,4 +10,6 @@ object Messages {
     const val EMPTY_CLIPBOARD = "empty_clipboard"
     const val PICKER_FAILED = "picker_failed"
     const val CANCELLED = "cancelled"
+    const val BUBBLE_OTHER_APPS = "bubble_other_apps"
+    const val CLIPBOARD_NO_FOCUS = "clipboard_no_focus"
 }

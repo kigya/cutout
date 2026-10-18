@@ -47,7 +47,7 @@ test('Bubble successful exports collapse explicitly, preserve the result and lea
   expect(toast).toHaveBeenLastCalledWith('Copied', ToastAndroid.SHORT);
   expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Hide bubble' })).toBeNull();
-  expect(screen.getByRole('button', { name: 'Cut background' })).toHaveStyle({ opacity: 0.7 });
+  expect(screen.getByTestId('bubble-artwork')).toHaveStyle({ opacity: 0.7 });
   await frame({ ...result, revision: 11 });
   expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy();
   await userEvent.press(screen.getByRole('button', { name: 'Save' })); await settle();

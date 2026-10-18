@@ -11,6 +11,7 @@ import com.facebook.react.bridge.ReactContext
 import dev.kigya.cutout.bridge.EraseEntryPoint
 import dev.kigya.cutout.bridge.EraseModule
 import dev.kigya.cutout.bridge.ErasePackage
+import dev.kigya.cutout.data.BubbleAppearance
 import dev.kigya.cutout.data.BubblePreferences
 import dev.kigya.cutout.overlay.BubblePresenter
 import dev.kigya.cutout.overlay.BubbleUiState
@@ -44,7 +45,11 @@ class AppWiringTest {
         val presenter = mockk<BubblePresenter>()
         every { presenter.state } returns MutableStateFlow(BubbleUiState())
         every { entry.presenter() } returns presenter
+        every { entry.window() } returns dev.kigya.cutout.overlay.BubbleWindow()
+        every { entry.mainActivityState() } returns MainActivityState()
         val preferences = mockk<BubblePreferences>()
+        every { preferences.appearance } returns kotlinx.coroutines.flow.MutableStateFlow(BubbleAppearance())
+        every { preferences.onboardingCompleted } returns kotlinx.coroutines.flow.MutableStateFlow(false)
         every { preferences.enabled } returns MutableStateFlow(false)
         every { entry.preferences() } returns preferences
         mockkStatic(EntryPointAccessors::class)
@@ -65,6 +70,7 @@ class AppWiringTest {
             app.getSharedPreferences("cutout_preferences", Context.MODE_PRIVATE).edit().putString("theme", theme).commit()
             val controller = Robolectric.buildActivity(MainActivity::class.java)
             val activity = controller.get()
+            ReflectionHelpers.setField(activity, "mApplication", mockk<EraseApp>(relaxed = true))
             val delegate = mockk<ReactActivityDelegate>(relaxed = true)
             ReflectionHelpers.setField(activity, "mDelegate", delegate)
             val config = Configuration(activity.resources.configuration).apply {
@@ -103,5 +109,29 @@ class AppWiringTest {
         activity.onNewIntent(editor)
         verify(exactly = 1) { context.emitDeviceEvent("eraseOpenEdit") }
         controller.destroy()
+    }
+    @Test fun `activity lifecycle publishes foreground boundaries and coordinates overlay host`() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java)
+        val activity = controller.get()
+        val application = mockk<EraseApp>(relaxed = true)
+        val state = MainActivityState()
+        val lifecycle = mockk<dev.kigya.cutout.overlay.BubbleReactLifecycle>(relaxed = true)
+        every { application.mainActivityState } returns state
+        every { application.bubbleLifecycle } returns lifecycle
+        ReflectionHelpers.setField(activity, "mApplication", application)
+        ReflectionHelpers.setField(activity, "mDelegate", mockk<ReactActivityDelegate>(relaxed = true))
+        controller.create().start()
+        assertTrue(state.state.value.visible)
+        assertFalse(state.state.value.resumed)
+        controller.resume()
+        assertTrue(state.state.value.resumed)
+        verify(exactly = 1) { lifecycle.beforeActivityResume() }
+        controller.pause()
+        assertFalse(state.state.value.resumed)
+        assertTrue(state.state.value.visible)
+        controller.stop()
+        assertFalse(state.state.value.visible)
+        controller.destroy()
+        verify(exactly = 2) { lifecycle.afterActivityCallback() }
     }
 }
