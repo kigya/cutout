@@ -6,7 +6,7 @@ import { DEFAULT_BUBBLE_APPEARANCE, normalizeBubbleAppearance } from '../logic/b
 import { SweepPreview } from '../components/SweepPreview';
 import { Notice } from '../components/ui/notice';
 import { bubbleFrame } from '../logic/bubble';
-import { clampPercent } from '../logic/progress';
+import { useDisplayedProgress } from '../logic/useDisplayedProgress';
 import { savePhase } from '../logic/save';
 import { isRtl } from '../logic/languages';
 import { localizeMessage } from '../i18n/catalogs';
@@ -119,6 +119,7 @@ export function BubbleApp() {
   const chipSize = geometry?.chipSizeDp ?? appearance.sizeDp + 8;
   const visualSize = chipSize - 8;
   const busy = state.phase === 'working';
+  const displayedPercent = useDisplayedProgress(state.percent, busy, state.taskId);
   const result = state.phase === 'copied' || (state.phase === 'failed' && state.editReady);
   const anchorEnd = geometry?.anchorEnd ?? state.anchorEnd;
   const chipLeft = geometry?.chipLeftDp ?? 272;
@@ -236,7 +237,7 @@ export function BubbleApp() {
           <SweepPreview overlayVisible path={state.previewPath} width={220} height={112} />
           {state.stage === 'inference' ? <ActivityIndicator className="mt-3" color={colors.accent} /> : null}
           {state.stage === 'inference' ? <Text className="mt-3 text-center text-base" style={{ color: colors.textMuted }}>{t('processingInference')}</Text> : null}
-          <Text accessibilityRole="progressbar" accessibilityLabel={t('processing')} accessibilityValue={{ min: 0, max: 100, now: clampPercent(state.percent) }} className="mt-3 text-center text-lg font-semibold" style={{ color: colors.text }}>{clampPercent(state.percent)}%</Text>
+          <Text accessibilityRole="progressbar" accessibilityLabel={t('processing')} accessibilityValue={{ min: 0, max: 100, now: displayedPercent }} className="mt-3 text-center text-lg font-semibold" style={{ color: colors.text }}>{displayedPercent}%</Text>
         </View>
       ) : null}
       {result ? (

@@ -147,9 +147,16 @@ test('onboarding advances manually, supports Back/swipes/dots, and retries compl
 
 test('onboarding walkthrough is interactive and never reads the clipboard or requests permissions', async () => {
   await render(wrap(<OnboardingScreen onComplete={jest.fn()} />)); await flush();
+  expect(screen.getByRole('button', { name: 'Next' })).toHaveStyle({ alignItems: 'center', justifyContent: 'center', width: '100%' });
+  expect(screen.getByText('Next')).toHaveStyle({ textAlign: 'center' });
   await fireEvent.press(screen.getByRole('button', { name: 'Next' })); await flush();
   await fireEvent.press(screen.getByRole('button', { name: 'Next' })); await flush();
+  expect(screen.getByText('Get started')).toHaveStyle({ textAlign: 'center' });
   await time(1600); expect(screen.getByRole('button', { name: 'Clipboard' })).toBeOnTheScreen();
+  for (const name of ['Clipboard', 'Gallery', 'File']) {
+    expect(screen.getByRole('button', { name })).toHaveStyle({ justifyContent: 'center' });
+    expect(screen.getByText(name)).toHaveStyle({ textAlign: 'center' });
+  }
   await time(3200); expect(screen.queryByRole('button', { name: 'Clipboard' })).not.toBeOnTheScreen();
   await fireEvent.press(screen.getByRole('button', { name: 'Tap the Bubble' }));
   await fireEvent.press(screen.getByRole('button', { name: 'Clipboard' })); await time(1100);

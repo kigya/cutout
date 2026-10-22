@@ -74,8 +74,8 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => Promise<voi
           <View style={{ width: page === index ? 26 : 7, height: 7, borderRadius: 4, backgroundColor: page === index ? colors.primary : colors.border }} />
         </Pressable>)}
       </View>
-      <Pressable accessibilityRole="button" accessibilityState={{ disabled: saving, busy: saving }} disabled={saving} onPress={() => { void finish(); }} style={({ pressed }) => ({ minHeight: 58, borderRadius: 20, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', opacity: pressed || saving ? 0.8 : 1, boxShadow: isDark ? undefined : '0 7px 16px rgba(34,89,207,0.2)' })}>
-        <Text style={{ fontFamily: typography, fontWeight: '700', fontSize: 17, color: colors.onPrimary }}>{t(page === 2 ? 'onboardingGetStarted' : 'onboardingNext')}</Text>
+      <Pressable accessibilityRole="button" accessibilityState={{ disabled: saving, busy: saving }} disabled={saving} onPress={() => { void finish(); }} className="items-center justify-center active:opacity-80 disabled:opacity-80" style={{ width: '100%', minHeight: 58, borderRadius: 20, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', boxShadow: isDark ? undefined : '0 7px 16px rgba(34,89,207,0.2)' }}>
+        <Text style={{ width: '100%', textAlign: 'center', paddingHorizontal: 16, fontFamily: typography, fontWeight: '700', fontSize: 17, color: colors.onPrimary }}>{t(page === 2 ? 'onboardingGetStarted' : 'onboardingNext')}</Text>
       </Pressable>
     </View>
   </View>;
