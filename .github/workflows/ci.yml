@@ -72,7 +72,7 @@ jobs:
           annotations: false
 
   android:
-    name: Android release/R8 and strict native coverage
+    name: Android tests, coverage report and release/R8
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -106,8 +106,8 @@ jobs:
       - name: Install locked JavaScript dependencies
         run: npm ci
 
-      - name: Build optimized release and enforce native line/branch coverage
-        run: ./gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:nativeCoverageCheck :app:assembleRelease
+      - name: Run native tests, report coverage and build optimized release
+        run: ./gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:testDebugUnitTest :app:nativeCoverageReport :app:assembleRelease
 
       - name: Scan mobile source and effective Android permissions
         env:

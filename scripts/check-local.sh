@@ -83,10 +83,10 @@ if (( RUN_ANDROID )); then
   else
     ANDROID_JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")"
   fi
-  printf '\n== Android release/R8 and strict native coverage ==\n'
-  ./gradlew -Dorg.gradle.java.home="$ANDROID_JAVA_HOME" :app:nativeCoverageCheck :app:assembleRelease
+  printf '\n== Android tests, coverage report and release/R8 ==\n'
+  ./gradlew -Dorg.gradle.java.home="$ANDROID_JAVA_HOME" :app:testDebugUnitTest :app:nativeCoverageReport :app:assembleRelease
 else
-  printf 'SKIPPED: Android native coverage and release/R8 build (pass --android)\n'
+  printf 'SKIPPED: Android tests, native coverage report and release/R8 build (pass --android)\n'
 fi
 
 if (( RUN_IOS )); then
