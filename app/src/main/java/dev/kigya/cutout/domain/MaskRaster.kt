@@ -22,21 +22,10 @@ fun isnetChw(pixels: IntArray): FloatArray {
 }
 
 fun softAlpha(value: Float): Float {
-    val t = ((value - 0.18f) / 0.32f).coerceIn(0f, 1f)
+    // Keep the model's 0.5 decision boundary. The former asymmetric ramp
+    // made every probability >= 0.5 opaque and amplified background edges.
+    val t = ((value - 0.1f) / 0.8f).coerceIn(0f, 1f)
     return t * t * (3f - 2f * t)
-}
-
-fun stretchUnit(values: FloatArray): FloatArray {
-    if (values.isEmpty()) return FloatArray(0)
-    var min = values[0]
-    var max = values[0]
-    for (value in values) {
-        if (value < min) min = value
-        if (value > max) max = value
-    }
-    val span = max - min
-    if (span < 1e-5f) return FloatArray(values.size)
-    return FloatArray(values.size) { index -> (values[index] - min) / span }
 }
 
 fun resampleBilinear(

@@ -58,6 +58,76 @@ class BackgroundRemoverTest {
         ReflectionHelpers.setField(remover, "inputName", "image")
         assertEquals(Removal.Broken("model"), remover.cut(image()))
     }
+    @Test fun `uncertain background probabilities are not promoted to opaque pixels`() = runBlocking<Unit> {
+        val engine = mockk<OrtSession>()
+        every { engine.run(any<Map<String, OnnxTensor>>()) } returns result(output(floatArrayOf(0f, .25f, .75f, .5f)))
+        val source = image()
+        val cut = prepared(engine).cut(source) as Removal.Ready
+        try {
+            val alpha = (0..3).map { Color.alpha(cut.frame.getPixel(it % 2, it / 2)) }
+            assertEquals(0, alpha[0])
+            assertTrue(alpha[1] in 1..63)
+            assertTrue(alpha[2] in 191..255)
+            assertEquals(127, alpha[3])
+        } finally {
+            if (cut.bitmap !== cut.frame) cut.bitmap.recycle()
+            cut.frame.recycle(); source.recycle()
+        }
+    }
+
+    @Test fun `nonfinite model samples fail without exporting a partially corrupt mask`() = runBlocking<Unit> {
+        for (bad in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            val engine = mockk<OrtSession>()
+            val result = result(output(floatArrayOf(0f, bad, .9f, .65f)))
+            every { engine.run(any<Map<String, OnnxTensor>>()) } returns result
+            val source = image()
+            assertEquals(Removal.Broken("mask"), prepared(engine).cut(source))
+            assertFalse(source.isRecycled)
+            source.recycle()
+            verify(exactly = 1) { result.close() }
+        }
+    }
+
+    @Test fun `inference cancellation closes its tensor and propagates cancellation`() {
+        val engine = mockk<OrtSession>()
+        var input: OnnxTensor? = null
+        every { engine.run(any<Map<String, OnnxTensor>>()) } answers {
+            input = firstArg<Map<String, OnnxTensor>>().getValue("image")
+            throw kotlinx.coroutines.CancellationException("cancelled")
+        }
+        val source = image()
+        try {
+            assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+                runBlocking { prepared(engine).cut(source) }
+            }
+            assertTrue(input!!.isClosed)
+            assertFalse(source.isRecycled)
+        } finally { source.recycle() }
+    }
+
+    @Test fun `model rounding overshoot is clamped while source transparency remains an upper bound`() = runBlocking<Unit> {
+        val engine = mockk<OrtSession>()
+        every { engine.run(any<Map<String, OnnxTensor>>()) } returns result(output(floatArrayOf(-.001f, 1.001f, .5f, .75f)))
+        val source = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
+        source.setPixel(1, 0, Color.argb(64, 255, 0, 0))
+        val cut = prepared(engine).cut(source) as Removal.Ready
+        try {
+            assertEquals(listOf(0, 64, 127, 231), (0..3).map { Color.alpha(cut.frame.getPixel(it % 2, it / 2)) })
+        } finally {
+            if (cut.bitmap !== cut.frame) cut.bitmap.recycle()
+            cut.frame.recycle(); source.recycle()
+        }
+    }
+
+    @Test fun `missing spatial dimensions are rejected before reading the output buffer`() = runBlocking<Unit> {
+        val engine = mockk<OrtSession>()
+        val tensor = output(floatArrayOf(0f, 1f))
+        every { (tensor.info as TensorInfo).shape } returns longArrayOf(2)
+        every { engine.run(any<Map<String, OnnxTensor>>()) } returns result(tensor)
+        val source = image()
+        try { assertEquals(Removal.Broken("mask"), prepared(engine).cut(source)) }
+        finally { source.recycle() }
+    }
     @Test fun `real bundled fixture runs through cached model and preserves transparent output`() = runBlocking<Unit> {
         val remover = BackgroundRemover(app)
         remover.prepare().getOrThrow()
@@ -94,6 +164,20 @@ class BackgroundRemoverTest {
         assertEquals(Removal.Broken("inference failed"), prepared(engine).cut(source))
         assertTrue(input!!.isClosed)
         assertFalse(source.isRecycled)
+    }
+    @Test fun `native allocation errors retain the existing failure outcome and close the tensor`() = runBlocking<Unit> {
+        val engine = mockk<OrtSession>()
+        var input: OnnxTensor? = null
+        every { engine.run(any<Map<String, OnnxTensor>>()) } answers {
+            input = firstArg<Map<String, OnnxTensor>>().getValue("image")
+            throw OutOfMemoryError("native allocation")
+        }
+        val source = image()
+        try {
+            assertEquals(Removal.Broken("native allocation"), prepared(engine).cut(source))
+            assertTrue(input!!.isClosed)
+            assertFalse(source.isRecycled)
+        } finally { source.recycle() }
     }
     @Test fun `mask rejection always closes result and input`() = runBlocking<Unit> {
         for (value in listOf<OnnxValue>(mockk(), output(floatArrayOf(0f,0f,0f,0f)), output(floatArrayOf(0f), 2, 2), output(floatArrayOf(), 0, 2), output(floatArrayOf(), 2, 0))) {

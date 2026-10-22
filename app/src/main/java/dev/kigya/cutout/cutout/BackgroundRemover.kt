@@ -11,12 +11,14 @@ import dev.kigya.cutout.domain.boundsOfAlpha
 import dev.kigya.cutout.domain.isnetChw
 import dev.kigya.cutout.domain.resampleBilinear
 import dev.kigya.cutout.domain.softAlpha
-import dev.kigya.cutout.domain.stretchUnit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.nio.FloatBuffer
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -51,7 +53,22 @@ class BackgroundRemover @Inject constructor(
         mutex.withLock {
             val engine = session ?: return@withLock Removal.Broken("model")
             val name = inputName ?: return@withLock Removal.Broken("model")
-            runCatching { segment(engine, name, source) }.getOrElse { error ->
+            currentCoroutineContext().ensureActive()
+            try {
+                val removal = segment(engine, name, source)
+                try {
+                    currentCoroutineContext().ensureActive()
+                    removal
+                } catch (cancelled: CancellationException) {
+                    if (removal is Removal.Ready) {
+                        if (removal.bitmap !== removal.frame) removal.bitmap.recycle()
+                        removal.frame.recycle()
+                    }
+                    throw cancelled
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
                 Removal.Broken(error.message ?: error.javaClass.simpleName)
             }
         }
@@ -80,7 +97,7 @@ class BackgroundRemover @Inject constructor(
         }
     }
 
-    private fun segment(engine: OrtSession, name: String, source: Bitmap): Removal {
+    private suspend fun segment(engine: OrtSession, name: String, source: Bitmap): Removal {
         val env = environment ?: return Removal.Broken("model")
         val frame = software(source) ?: return Removal.Broken("bitmap")
         try {
@@ -90,7 +107,7 @@ class BackgroundRemover @Inject constructor(
         }
     }
 
-    private fun segmentFrame(
+    private suspend fun segmentFrame(
         engine: OrtSession,
         name: String,
         env: OrtEnvironment,
@@ -115,18 +132,27 @@ class BackgroundRemover @Inject constructor(
         )
         input.use {
             engine.run(mapOf(name to input)).use { result ->
+                currentCoroutineContext().ensureActive()
                 val output = result.get(0) as? OnnxTensor ?: return Removal.SubjectNotFound
                 val info = output.info as? TensorInfo ?: return Removal.Broken("mask")
+                if (info.shape.size < 2) return Removal.Broken("mask")
                 val height = info.shape[info.shape.size - 2].toInt()
                 val width = info.shape[info.shape.size - 1].toInt()
                 val buffer = output.floatBuffer
                 buffer.rewind()
-                val raw = FloatArray(buffer.remaining())
-                buffer.get(raw)
-                if (raw.size < width * height || width <= 0 || height <= 0) return Removal.Broken("mask")
-                val confidence = stretchUnit(raw.copyOf(width * height))
+                val count = width.toLong() * height.toLong()
+                if (width <= 0 || height <= 0 || count > buffer.remaining().toLong()) return Removal.Broken("mask")
+                val confidence = FloatArray(count.toInt())
+                buffer.get(confidence)
+                // This graph already ends in Sigmoid: these are probabilities,
+                // not logits or a range that should be stretched per image.
+                for (index in confidence.indices) {
+                    if (!confidence[index].isFinite()) return Removal.Broken("mask")
+                    confidence[index] = confidence[index].coerceIn(0f, 1f)
+                }
                 val fraction = MaskPolicy.foregroundFraction(confidence)
                 if (!MaskPolicy.evaluate(fraction).usable) return Removal.SubjectNotFound
+                currentCoroutineContext().ensureActive()
                 return paint(frame, confidence, width, height)
             }
         }

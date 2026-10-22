@@ -7,10 +7,10 @@ import org.junit.Test
 
 class MaskRasterTest {
     @Test
-    fun stretchAndFractionKeepAPartialSubject() {
-        val stretched = stretchUnit(floatArrayOf(0f, 0f, 1f, 0.2f))
-        assertEquals(0.25f, MaskPolicy.foregroundFraction(stretched), 0.0001f)
-        assertEquals(true, MaskPolicy.evaluate(MaskPolicy.foregroundFraction(stretched)).usable)
+    fun probabilitiesKeepAPartialSubjectWithoutStretching() {
+        val probabilities = floatArrayOf(0.1f, 0.1f, 0.9f, 0.2f)
+        assertEquals(0.25f, MaskPolicy.foregroundFraction(probabilities), 0.0001f)
+        assertEquals(true, MaskPolicy.evaluate(MaskPolicy.foregroundFraction(probabilities)).usable)
     }
 
     @Test
@@ -40,17 +40,15 @@ class MaskRasterTest {
 
     @Test
     fun softAlphaDropsAShadowGhostAndKeepsASolidSubject() {
-        assertEquals(0f, softAlpha(0.12f), 0.001f)
+        assertEquals(0f, softAlpha(0.08f), 0.001f)
         assertEquals(1f, softAlpha(0.99f), 0.001f)
-        val edge = softAlpha(0.34f)
-        assertTrue(edge > 0.1f && edge < 0.9f)
+        assertEquals(0.5f, softAlpha(0.5f), 0.0001f)
+        assertEquals(0.09228515625f, softAlpha(0.25f), 0.0001f)
+        assertEquals(0.90771484375f, softAlpha(0.75f), 0.0001f)
     }
 
     @Test
     fun constantAndEmptyMasksHaveDeterministicFallbacks() {
-        assertEquals(0f, stretchUnit(floatArrayOf(0.4f, 0.4f, 0.4f)).sum(), 0f)
-        assertTrue(stretchUnit(floatArrayOf()).isEmpty())
-
         assertEquals(listOf(0f, 0f, 0f, 0f), resampleBilinear(floatArrayOf(1f), 0, 1, 2, 2).toList())
         assertEquals(listOf(0f, 0f, 0f, 0f), resampleBilinear(floatArrayOf(1f), 1, 0, 2, 2).toList())
         assertTrue(resampleBilinear(floatArrayOf(1f), 1, 1, 0, 2).isEmpty())
