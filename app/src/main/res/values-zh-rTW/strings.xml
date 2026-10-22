@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">懸浮球在畫面上</string>
+    <string name="notification_hide">隱藏懸浮球</string>
+    <string name="channel_name">懸浮球</string>
+    <string name="channel_description">懸浮球開啟時讓它留在畫面上</string>
+</resources>

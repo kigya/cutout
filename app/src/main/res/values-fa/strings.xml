@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">حباب روی صفحه است</string>
+    <string name="notification_hide">پنهان کردن حباب</string>
+    <string name="channel_name">حباب</string>
+    <string name="channel_description">حباب را تا وقتی روشن است روی صفحه نگه می‌دارد</string>
+</resources>

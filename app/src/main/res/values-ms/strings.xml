@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Gelembung ada di skrin</string>
+    <string name="notification_hide">Sembunyikan gelembung</string>
+    <string name="channel_name">Gelembung</string>
+    <string name="channel_description">Menahan gelembung di skrin selama dihidupkan</string>
+</resources>

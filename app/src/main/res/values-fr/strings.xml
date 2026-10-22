@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">La bulle est à l’écran</string>
+    <string name="notification_hide">Masquer la bulle</string>
+    <string name="channel_name">Bulle</string>
+    <string name="channel_description">Garde la bulle à l’écran tant qu’elle est activée</string>
+</resources>

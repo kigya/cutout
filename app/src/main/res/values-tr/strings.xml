@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Balon ekranda</string>
+    <string name="notification_hide">Balonu gizle</string>
+    <string name="channel_name">Balon</string>
+    <string name="channel_description">Balon açıkken onu ekranda tutar</string>
+</resources>

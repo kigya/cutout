@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "CocoaPods React-cxxstableapi SPEC CHECKSUM is a package integrity SHA-1"
+condition = "AND"
+paths = ['''(^|/)ios/Podfile\.lock$''']
+regexTarget = "match"
+regexes = ['''^React-cxxstableapi:\s[0-9a-f]{40}$''']

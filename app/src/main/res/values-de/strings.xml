@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Die Blase ist auf dem Bildschirm</string>
+    <string name="notification_hide">Blase ausblenden</string>
+    <string name="channel_name">Blase</string>
+    <string name="channel_description">Hält die Blase auf dem Bildschirm, solange sie eingeschaltet ist</string>
+</resources>

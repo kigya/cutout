@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Bong bóng đang ở trên màn hình</string>
+    <string name="notification_hide">Ẩn bong bóng</string>
+    <string name="channel_name">Bong bóng</string>
+    <string name="channel_description">Giữ bong bóng trên màn hình khi nó đang bật</string>
+</resources>

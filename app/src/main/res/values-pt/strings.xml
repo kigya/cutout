@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">A bolha está na tela</string>
+    <string name="notification_hide">Ocultar bolha</string>
+    <string name="channel_name">Bolha</string>
+    <string name="channel_description">Mantém a bolha na tela enquanto está ativada</string>
+</resources>

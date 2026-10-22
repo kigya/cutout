@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">Dymek jest na ekranie</string>
+    <string name="notification_hide">Ukryj dymek</string>
+    <string name="channel_name">Dymek</string>
+    <string name="channel_description">Utrzymuje dymek na ekranie, dopóki jest włączony</string>
+</resources>

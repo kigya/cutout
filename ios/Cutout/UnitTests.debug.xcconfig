@@ -1,0 +1,5 @@
+#include "../Pods/Target Support Files/Pods-Cutout/Pods-Cutout.debug.xcconfig"
+
+// The hosted test bundle resolves modules from the app target. Do not link a
+// second copy of the static Pods into the test bundle.
+OTHER_LDFLAGS =

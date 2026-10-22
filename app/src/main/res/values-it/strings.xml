@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">La bolla è sullo schermo</string>
+    <string name="notification_hide">Nascondi bolla</string>
+    <string name="channel_name">Bolla</string>
+    <string name="channel_description">Tiene la bolla sullo schermo finché è attiva</string>
+</resources>

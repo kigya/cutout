@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">De bubbel staat op het scherm</string>
+    <string name="notification_hide">Bubbel verbergen</string>
+    <string name="channel_name">Bubbel</string>
+    <string name="channel_description">Houdt de bubbel op het scherm zolang die aan staat</string>
+</resources>

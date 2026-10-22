@@ -13,28 +13,7 @@ coverage/
 app/src/debug/assets/
 app/src/debug/res/
 
-# Personal workflow skills: BEGIN
-/.agents/skills/p-build-app
-/.agents/skills/p-find-ideas
-/.agents/skills/p-prepare-google-play
-/.agents/skills/p-capture-lesson
-/.agents/skills/p-create-readme
-# Personal workflow skills: END
 
-<!-- P BUILD APP: BEGIN -->
-/.agents/skills/p-build-app
-/.p-build-app/tooling.json
-/.p-build-app/npm-cache/
-/.p-build-app/local/
-/.local-private/
-.env
-.env.*
-!.env.example
-*.keystore
-*.jks
-*.p12
-*.mobileprovision
-<!-- P BUILD APP: END -->
 
 # Local agent context, research, credentials and generated evidence
 /.agents/
@@ -42,6 +21,7 @@ app/src/debug/res/
 /.codex/
 /.serena/
 /.p-build-app/
+/.local-private/
 /AGENTS.md
 /docs/
 /prd/
@@ -55,3 +35,25 @@ app/src/debug/res/
 .bundle/
 .env*
 !/.env.example
+
+/.firebaserc
+/firebase.json
+
+/ios/vendor/
+/ios/.bundle/
+/ios/*.xcworkspace/xcuserdata/
+**/xcuserdata/
+
+.kotlin/
+__pycache__/
+
+# Per-directory files created by the local skill watcher
+**/.agents/
+**/.gitignore
+!/.gitignore
+
+# Signing material
+*.keystore
+*.jks
+*.p12
+*.mobileprovision

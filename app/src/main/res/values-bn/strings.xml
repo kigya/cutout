@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_text">বাবল স্ক্রিনে আছে</string>
+    <string name="notification_hide">বাবল লুকান</string>
+    <string name="channel_name">বাবল</string>
+    <string name="channel_description">বাবল চালু থাকা পর্যন্ত স্ক্রিনে রাখে</string>
+</resources>
